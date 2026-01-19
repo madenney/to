@@ -1,0 +1,10 @@
+{
+  "identifier": "bracket-window",
+  "description": "Allow the test bracket window to access core APIs.",
+  "windows": ["spoof-bracket"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "opener:allow-open-url"
+  ]
+}

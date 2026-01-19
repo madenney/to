@@ -1,0 +1,12 @@
+{
+  "identifier": "main-window",
+  "description": "Allow the main window to use native open dialogs.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
+    "core:window:allow-set-focus",
+    "dialog:allow-open"
+  ]
+}

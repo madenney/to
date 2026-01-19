@@ -1,0 +1,23 @@
+[package]
+name = "new-melee-stream-tool"
+version = "0.0.1"
+description = "Melee Stream Tool (next) desktop shell"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "new_melee_stream_tool_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+x11rb = "0.13"
+reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"] }
+tungstenite = "0.21"
