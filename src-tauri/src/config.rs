@@ -421,6 +421,25 @@ pub fn app_test_mode_enabled() -> bool {
   }
 }
 
+pub fn log_env_warnings() {
+  let config = load_config_inner().unwrap_or_else(|_| AppConfig::default());
+  let mut warnings = Vec::new();
+
+  if config.dolphin_path.trim().is_empty() && env_default("DOLPHIN_PATH").is_none() {
+    warnings.push("DOLPHIN_PATH not set and no dolphin path in config — Dolphin launch will fail");
+  }
+  if config.ssbm_iso_path.trim().is_empty() && env_default("SSBM_ISO_PATH").is_none() {
+    warnings.push("SSBM_ISO_PATH not set and no ISO path in config — Dolphin launch will fail");
+  }
+  if config.slippi_launcher_path.trim().is_empty() && env_default("SLIPPI_APPIMAGE_PATH").is_none() {
+    warnings.push("SLIPPI_APPIMAGE_PATH not set and no Slippi path in config — Slippi launch may fail");
+  }
+
+  for msg in warnings {
+    tracing::warn!("{}", msg);
+  }
+}
+
 pub fn normalize_broadcast_key(raw: &str) -> String {
   raw.trim().to_lowercase()
 }

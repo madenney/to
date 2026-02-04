@@ -206,16 +206,28 @@ pub fn startgg_graphql_request<T: DeserializeOwned>(
     )
   };
   append_startgg_log("Start.gg request", &request_log);
-  let resp = client
-    .post(STARTGG_API_URL)
-    .header("Authorization", format!("Bearer {token}"))
-    .header("User-Agent", "new-melee-stream-tool")
-    .json(&json!({ "query": query, "variables": variables }))
-    .send()
-    .map_err(|e| {
-      append_startgg_log("Start.gg error", &format!("request failed: {e}"));
-      format!("Start.gg request failed: {e}")
-    })?;
+  let body_json = json!({ "query": query, "variables": variables });
+  let mut last_send_err = String::new();
+  let mut resp = None;
+  for attempt in 0..3u32 {
+    if attempt > 0 {
+      sleep(Duration::from_millis(500 * u64::from(attempt)));
+    }
+    match client
+      .post(STARTGG_API_URL)
+      .header("Authorization", format!("Bearer {token}"))
+      .header("User-Agent", "new-melee-stream-tool")
+      .json(&body_json)
+      .send()
+    {
+      Ok(r) => { resp = Some(r); break; }
+      Err(e) => {
+        last_send_err = format!("Start.gg request failed (attempt {}): {e}", attempt + 1);
+        append_startgg_log("Start.gg error", &last_send_err);
+      }
+    }
+  }
+  let resp = resp.ok_or_else(|| last_send_err.clone())?;
   let status = resp.status();
   let body = resp.text().map_err(|e| {
     append_startgg_log("Start.gg error", &format!("read failed: {e}"));

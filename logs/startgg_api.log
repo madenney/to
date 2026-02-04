@@ -12522,3 +12522,185 @@ status: 200 OK
 body:
 {"data":{"event":{"sets":{"pageInfo":{"totalPages":1},"nodes":[{"id":98622458,"round":4,"fullRoundText":"Grand Final","state":3,"startedAt":1769407223,"completedAt":1769408744,"updatedAt":1769408745,"winnerId":22441517,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441517,"name":"CoolGamer-Jay"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}},{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}}]},{"id":98622457,"round":3,"fullRoundText":"Winners Final","state":3,"startedAt":1769405685,"completedAt":1769406465,"updatedAt":1769406466,"winnerId":22441517,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":1,"label":"Score"}}}},{"entrant":{"id":22441517,"name":"CoolGamer-Jay"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622473,"round":-6,"fullRoundText":"Losers Final","state":3,"startedAt":1769406518,"completedAt":1769407145,"updatedAt":1769407146,"winnerId":22441530,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":1,"label":"Score"}}}},{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622472,"round":-5,"fullRoundText":"Losers Semi-Final","state":3,"startedAt":null,"completedAt":1769406510,"updatedAt":1769406511,"winnerId":22441530,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}},{"entrant":{"id":22441506,"name":"Leoh"},"standing":{"stats":{"score":{"value":-1,"label":"Score"}}}}]},{"id":98622455,"round":2,"fullRoundText":"Winners Semi-Final","state":3,"startedAt":null,"completedAt":1769405674,"updatedAt":1769405674,"winnerId":22441549,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441506,"name":"Leoh"},"standing":{"stats":{"score":{"value":-1,"label":"Score"}}}},{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}}]},{"id":98622456,"round":2,"fullRoundText":"Winners Semi-Final","state":3,"startedAt":1769404626,"completedAt":1769405664,"updatedAt":1769405664,"winnerId":22441517,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441511,"name":"cooler"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}},{"entrant":{"id":22441517,"name":"CoolGamer-Jay"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622470,"round":-4,"fullRoundText":"Losers Quarter-Final","state":3,"startedAt":1769405713,"completedAt":1769406437,"updatedAt":1769406438,"winnerId":22441530,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441511,"name":"cooler"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}},{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622452,"round":1,"fullRoundText":"Winners Quarter-Final","state":3,"startedAt":1769404674,"completedAt":1769405392,"updatedAt":1769405393,"winnerId":22441549,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":1,"label":"Score"}}}},{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]}]}}},"extensions":{"cacheControl":{"version":1,"hints":[{"path":["event"],"maxAge":60,"scope":"PRIVATE"}]},"queryComplexity":137},"actionRecords":[]}
 
+[2026-02-03 21:23:22.895] Start.gg request
+url: https://api.start.gg/gql/alpha
+Authorization: Bearer [redacted]
+User-Agent: new-melee-stream-tool
+query:
+
+query TournamentEvents($slug: String!) {
+  tournament(slug: $slug) {
+    events {
+      name
+      slug
+      type
+      videogame { id name }
+    }
+  }
+}
+
+variables:
+{
+  "slug": "jungle-test-3"
+}
+
+[2026-02-03 21:23:23.300] Start.gg response
+status: 200 OK
+body:
+{"data":{"tournament":{"events":[{"name":"Melee Singles","slug":"tournament\/jungle-test-3\/event\/melee-singles","type":1,"videogame":{"id":1,"name":"Super Smash Bros. Melee"}}]}},"extensions":{"cacheControl":{"version":1,"hints":[{"path":["tournament"],"maxAge":300,"scope":"PRIVATE"}]},"queryComplexity":3},"actionRecords":[]}
+
+[2026-02-03 21:23:23.327] Start.gg request
+url: https://api.start.gg/gql/alpha
+Authorization: Bearer [redacted]
+User-Agent: new-melee-stream-tool
+query:
+
+query EventInfo($slug: String!) {
+  event(slug: $slug) {
+    id
+    name
+    slug
+    phases {
+      id
+      name
+    }
+  }
+}
+
+variables:
+{
+  "slug": "tournament/jungle-test-3/event/melee-singles"
+}
+
+[2026-02-03 21:23:23.750] Start.gg response
+status: 200 OK
+body:
+{"data":{"event":{"id":1546487,"name":"Melee Singles","slug":"tournament\/jungle-test-3\/event\/melee-singles","phases":[{"id":2186560,"name":"Bracket"}]}},"extensions":{"cacheControl":{"version":1,"hints":[{"path":["event"],"maxAge":60,"scope":"PRIVATE"}]},"queryComplexity":2},"actionRecords":[]}
+
+[2026-02-03 21:23:23.777] Start.gg request
+url: https://api.start.gg/gql/alpha
+Authorization: Bearer [redacted]
+User-Agent: new-melee-stream-tool
+query:
+
+query EventEntrants($slug: String!, $page: Int!, $perPage: Int!) {
+  event(slug: $slug) {
+    entrants(query: { page: $page, perPage: $perPage }) {
+      pageInfo {
+        totalPages
+      }
+      nodes {
+        id
+        name
+        seeds { seedNum }
+        seed
+        slippiCode
+        customFields { name value }
+        participants {
+          gamerTag
+          player { gamerTag slippiCode }
+          user { authorizations { type externalUsername } }
+        }
+      }
+    }
+  }
+}
+
+variables:
+{
+  "slug": "tournament/jungle-test-3/event/melee-singles",
+  "page": 1,
+  "perPage": 200
+}
+
+[2026-02-03 21:23:24.242] Start.gg response
+status: 200 OK
+body:
+{"errors":[{"message":"Cannot query field \"seed\" on type \"Entrant\". Did you mean \"seeds\"?","extensions":{"category":"graphql"},"locations":[{"line":12,"column":9}],"errorId":"ea0d7a"},{"message":"Cannot query field \"slippiCode\" on type \"Entrant\".","extensions":{"category":"graphql"},"locations":[{"line":13,"column":9}],"errorId":"310aa5"},{"message":"Cannot query field \"customFields\" on type \"Entrant\".","extensions":{"category":"graphql"},"locations":[{"line":14,"column":9}],"errorId":"1acaad"},{"message":"Cannot query field \"slippiCode\" on type \"Player\".","extensions":{"category":"graphql"},"locations":[{"line":17,"column":29}],"errorId":"3e77dc"}],"extensions":{"cacheControl":{"version":1,"hints":null},"queryComplexity":0},"actionRecords":[]}
+
+[2026-02-03 21:23:24.242] Start.gg error
+graphql error: Cannot query field "seed" on type "Entrant". Did you mean "seeds"?, Cannot query field "slippiCode" on type "Entrant"., Cannot query field "customFields" on type "Entrant"., Cannot query field "slippiCode" on type "Player".
+
+[2026-02-03 21:23:24.270] Start.gg request
+url: https://api.start.gg/gql/alpha
+Authorization: Bearer [redacted]
+User-Agent: new-melee-stream-tool
+query:
+
+query EventEntrants($slug: String!, $page: Int!, $perPage: Int!) {
+  event(slug: $slug) {
+    entrants(query: { page: $page, perPage: $perPage }) {
+      pageInfo {
+        totalPages
+      }
+      nodes {
+        id
+        name
+        seeds { seedNum }
+        participants {
+          gamerTag
+          player { gamerTag }
+          user { authorizations { type externalUsername } }
+        }
+      }
+    }
+  }
+}
+
+variables:
+{
+  "slug": "tournament/jungle-test-3/event/melee-singles",
+  "page": 1,
+  "perPage": 200
+}
+
+[2026-02-03 21:23:24.738] Start.gg response
+status: 200 OK
+body:
+{"data":{"event":{"entrants":{"pageInfo":{"totalPages":1},"nodes":[{"id":22441549,"name":"oshawott=swag","seeds":[{"seedNum":5}],"participants":[{"gamerTag":"oshawott=swag","player":{"gamerTag":"oshawott=swag"},"user":{"authorizations":[{"type":"DISCORD","externalUsername":"oshawott64_"}]}}]},{"id":22441530,"name":"otw | sweat","seeds":[{"seedNum":4}],"participants":[{"gamerTag":"sweat","player":{"gamerTag":"sweat"},"user":{"authorizations":null}}]},{"id":22441517,"name":"CoolGamer-Jay","seeds":[{"seedNum":3}],"participants":[{"gamerTag":"CoolGamer-Jay","player":{"gamerTag":"CoolGamer-Jay"},"user":{"authorizations":null}}]},{"id":22441511,"name":"cooler","seeds":[{"seedNum":2}],"participants":[{"gamerTag":"cooler","player":{"gamerTag":"cooler"},"user":{"authorizations":[{"type":"DISCORD","externalUsername":"coolingincome"}]}}]},{"id":22441506,"name":"Leoh","seeds":[{"seedNum":1}],"participants":[{"gamerTag":"Leoh","player":{"gamerTag":"Leoh"},"user":{"authorizations":[{"type":"DISCORD","externalUsername":"whoe_18278"}]}}]}]}}},"extensions":{"cacheControl":{"version":1,"hints":[{"path":["event"],"maxAge":60,"scope":"PRIVATE"}]},"queryComplexity":29},"actionRecords":[]}
+
+[2026-02-03 21:23:24.766] Start.gg request
+url: https://api.start.gg/gql/alpha
+Authorization: Bearer [redacted]
+User-Agent: new-melee-stream-tool
+query:
+
+query EventSets($slug: String!, $page: Int!, $perPage: Int!) {
+  event(slug: $slug) {
+    sets(page: $page, perPage: $perPage) {
+      pageInfo {
+        totalPages
+      }
+      nodes {
+        id
+        round
+        fullRoundText
+        state
+        startedAt
+        completedAt
+        updatedAt
+        winnerId
+        phaseGroup {
+          phase { id name }
+        }
+        slots {
+          entrant { id name }
+          standing { stats { score { value label } } }
+        }
+      }
+    }
+  }
+}
+
+variables:
+{
+  "slug": "tournament/jungle-test-3/event/melee-singles",
+  "page": 1,
+  "perPage": 200
+}
+
+[2026-02-03 21:23:25.340] Start.gg response
+status: 200 OK
+body:
+{"data":{"event":{"sets":{"pageInfo":{"totalPages":1},"nodes":[{"id":98622458,"round":4,"fullRoundText":"Grand Final","state":3,"startedAt":1769407223,"completedAt":1769408744,"updatedAt":1769408745,"winnerId":22441517,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441517,"name":"CoolGamer-Jay"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}},{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}}]},{"id":98622457,"round":3,"fullRoundText":"Winners Final","state":3,"startedAt":1769405685,"completedAt":1769406465,"updatedAt":1769406466,"winnerId":22441517,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":1,"label":"Score"}}}},{"entrant":{"id":22441517,"name":"CoolGamer-Jay"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622473,"round":-6,"fullRoundText":"Losers Final","state":3,"startedAt":1769406518,"completedAt":1769407145,"updatedAt":1769407146,"winnerId":22441530,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":1,"label":"Score"}}}},{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622472,"round":-5,"fullRoundText":"Losers Semi-Final","state":3,"startedAt":null,"completedAt":1769406510,"updatedAt":1769406511,"winnerId":22441530,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}},{"entrant":{"id":22441506,"name":"Leoh"},"standing":{"stats":{"score":{"value":-1,"label":"Score"}}}}]},{"id":98622455,"round":2,"fullRoundText":"Winners Semi-Final","state":3,"startedAt":null,"completedAt":1769405674,"updatedAt":1769405674,"winnerId":22441549,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441506,"name":"Leoh"},"standing":{"stats":{"score":{"value":-1,"label":"Score"}}}},{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}}]},{"id":98622456,"round":2,"fullRoundText":"Winners Semi-Final","state":3,"startedAt":1769404626,"completedAt":1769405664,"updatedAt":1769405664,"winnerId":22441517,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441511,"name":"cooler"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}},{"entrant":{"id":22441517,"name":"CoolGamer-Jay"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622470,"round":-4,"fullRoundText":"Losers Quarter-Final","state":3,"startedAt":1769405713,"completedAt":1769406437,"updatedAt":1769406438,"winnerId":22441530,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441511,"name":"cooler"},"standing":{"stats":{"score":{"value":0,"label":"Score"}}}},{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]},{"id":98622452,"round":1,"fullRoundText":"Winners Quarter-Final","state":3,"startedAt":1769404674,"completedAt":1769405392,"updatedAt":1769405393,"winnerId":22441549,"phaseGroup":{"phase":{"id":2186560,"name":"Bracket"}},"slots":[{"entrant":{"id":22441530,"name":"otw | sweat"},"standing":{"stats":{"score":{"value":1,"label":"Score"}}}},{"entrant":{"id":22441549,"name":"oshawott=swag"},"standing":{"stats":{"score":{"value":2,"label":"Score"}}}}]}]}}},"extensions":{"cacheControl":{"version":1,"hints":[{"path":["event"],"maxAge":60,"scope":"PRIVATE"}]},"queryComplexity":137},"actionRecords":[]}
+

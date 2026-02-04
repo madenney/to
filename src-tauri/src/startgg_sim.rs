@@ -2106,3 +2106,310 @@ fn next_power_of_two(n: usize) -> usize {
   value = value.next_power_of_two();
   value
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn make_entrants(n: u32) -> Vec<StartggSimEntrantConfig> {
+    (1..=n)
+      .map(|i| StartggSimEntrantConfig {
+        id: i,
+        name: format!("Player {i}"),
+        slippi_code: format!("P{i}#000"),
+        seed: Some(i),
+      })
+      .collect()
+  }
+
+  fn make_config(n: u32) -> StartggSimConfig {
+    StartggSimConfig {
+      event: StartggSimEventConfig {
+        id: "test-event".to_string(),
+        name: "Test Event".to_string(),
+        slug: "test-event".to_string(),
+      },
+      phases: vec![StartggSimPhaseConfig {
+        id: "phase-1".to_string(),
+        name: "Bracket".to_string(),
+        best_of: 3,
+      }],
+      entrants: make_entrants(n),
+      simulation: StartggSimSimulationConfig {
+        manual_mode: true,
+        ..Default::default()
+      },
+      reference_tournament_link: None,
+      reference_sets: Vec::new(),
+    }
+  }
+
+  fn make_sim(n: u32) -> StartggSim {
+    StartggSim::new(make_config(n), 1000).expect("sim should init")
+  }
+
+  // ── SimRng ───────────────────────────────────────────────────────────
+
+  #[test]
+  fn rng_deterministic() {
+    let mut a = SimRng::new(42);
+    let mut b = SimRng::new(42);
+    for _ in 0..100 {
+      assert_eq!(a.next_u64(), b.next_u64());
+    }
+  }
+
+  #[test]
+  fn rng_zero_seed_not_stuck() {
+    let mut rng = SimRng::new(0);
+    let first = rng.next_u64();
+    let second = rng.next_u64();
+    assert_ne!(first, second);
+  }
+
+  #[test]
+  fn rng_gen_range_within_bounds() {
+    let mut rng = SimRng::new(99);
+    for _ in 0..200 {
+      let val = rng.gen_range_u32(5, 10);
+      assert!((5..=10).contains(&val), "out of range: {val}");
+    }
+  }
+
+  // ── normalize_entrants ───────────────────────────────────────────────
+
+  #[test]
+  fn normalize_entrants_sorted_by_seed() {
+    let entries = vec![
+      StartggSimEntrantConfig { id: 1, name: "A".into(), slippi_code: "A#1".into(), seed: Some(3) },
+      StartggSimEntrantConfig { id: 2, name: "B".into(), slippi_code: "B#1".into(), seed: Some(1) },
+      StartggSimEntrantConfig { id: 3, name: "C".into(), slippi_code: "C#1".into(), seed: Some(2) },
+    ];
+    let result = normalize_entrants(&entries).unwrap();
+    let seeds: Vec<u32> = result.iter().map(|e| e.seed).collect();
+    assert_eq!(seeds, vec![1, 2, 3]);
+  }
+
+  #[test]
+  fn normalize_entrants_empty_fails() {
+    let result = normalize_entrants(&[]);
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn normalize_entrants_fills_missing_seeds() {
+    let entries = vec![
+      StartggSimEntrantConfig { id: 1, name: "A".into(), slippi_code: "A#1".into(), seed: None },
+      StartggSimEntrantConfig { id: 2, name: "B".into(), slippi_code: "B#1".into(), seed: None },
+    ];
+    let result = normalize_entrants(&entries).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_ne!(result[0].seed, result[1].seed);
+  }
+
+  // ── StartggSim construction ──────────────────────────────────────────
+
+  #[test]
+  fn sim_new_rejects_too_few_entrants() {
+    let config = make_config(1);
+    let result = StartggSim::new(config, 1000);
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn sim_new_rejects_no_phases() {
+    let mut config = make_config(4);
+    config.phases.clear();
+    let result = StartggSim::new(config, 1000);
+    assert!(result.is_err());
+  }
+
+  #[test]
+  fn sim_new_4_entrants_produces_sets() {
+    let sim = make_sim(4);
+    assert!(!sim.sets.is_empty(), "should have sets");
+    // Double elim with 4 entrants: W1 (2 sets) + W2 (1) + L1 (1) + L2 (1) + GF1 (1) + GF2 (1) = 7
+    assert!(sim.sets.len() >= 6, "4 entrants should have at least 6 sets, got {}", sim.sets.len());
+  }
+
+  #[test]
+  fn sim_new_8_entrants_produces_sets() {
+    let sim = make_sim(8);
+    assert!(sim.sets.len() >= 14, "8 entrants should have at least 14 sets, got {}", sim.sets.len());
+  }
+
+  // ── State snapshots ──────────────────────────────────────────────────
+
+  #[test]
+  fn state_returns_all_entrants() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    assert_eq!(state.entrants.len(), 4);
+  }
+
+  #[test]
+  fn state_since_filters_sets() {
+    let mut sim = make_sim(4);
+    let all = sim.state(1000);
+    let none = sim.state_since(1000, Some(2000));
+    assert!(none.sets.len() < all.sets.len() || none.sets.is_empty());
+  }
+
+  // ── advance_set ──────────────────────────────────────────────────────
+
+  #[test]
+  fn advance_set_invalid_id() {
+    let mut sim = make_sim(4);
+    let result = sim.advance_set(999999, 2000);
+    assert!(result.is_err());
+  }
+
+  // ── force_winner ─────────────────────────────────────────────────────
+
+  #[test]
+  fn force_winner_completes_set() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    // Find a set that has both entrants filled (winners round 1)
+    let ready_set = state.sets.iter().find(|s| {
+      s.state == "pending"
+        && s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    if let Some(set) = ready_set {
+      let id = set.id;
+      sim.force_winner(id, 0, 2000).expect("force_winner should succeed");
+      let after = sim.state(2000);
+      let completed = after.sets.iter().find(|s| s.id == id).unwrap();
+      assert_eq!(completed.state, "completed");
+      assert_eq!(completed.winner_id, completed.slots[0].entrant_id);
+    }
+  }
+
+  #[test]
+  fn force_winner_invalid_slot() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    let set = state.sets.iter().find(|s| {
+      s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    if let Some(set) = set {
+      let result = sim.force_winner(set.id, 5, 2000);
+      assert!(result.is_err());
+    }
+  }
+
+  // ── mark_dq ──────────────────────────────────────────────────────────
+
+  #[test]
+  fn mark_dq_completes_set() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    let ready_set = state.sets.iter().find(|s| {
+      s.state == "pending"
+        && s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    if let Some(set) = ready_set {
+      let id = set.id;
+      sim.mark_dq(id, 1, 2000).expect("mark_dq should succeed");
+      let after = sim.state(2000);
+      let completed = after.sets.iter().find(|s| s.id == id).unwrap();
+      assert_eq!(completed.state, "completed");
+      // Slot 1 should have "dq" result
+      assert_eq!(completed.slots[1].result.as_deref(), Some("dq"));
+    }
+  }
+
+  // ── update_set_scores_manual ─────────────────────────────────────────
+
+  #[test]
+  fn update_scores_auto_starts() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    let ready_set = state.sets.iter().find(|s| {
+      s.state == "pending"
+        && s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    if let Some(set) = ready_set {
+      let id = set.id;
+      sim.update_set_scores_manual(id, [1, 0], 2000).expect("update scores should succeed");
+      let after = sim.state(2000);
+      let updated = after.sets.iter().find(|s| s.id == id).unwrap();
+      assert_eq!(updated.state, "inProgress");
+      assert_eq!(updated.slots[0].score, Some(1));
+      assert_eq!(updated.slots[1].score, Some(0));
+    }
+  }
+
+  // ── complete_all_sets ────────────────────────────────────────────────
+
+  #[test]
+  fn complete_all_sets_finishes_bracket() {
+    let mut sim = make_sim(4);
+    sim.complete_all_sets(5000).expect("complete_all_sets should succeed");
+    let state = sim.state(5000);
+    let pending_count = state.sets.iter().filter(|s| s.state == "pending").count();
+    assert_eq!(pending_count, 0, "no sets should be pending after complete_all_sets");
+  }
+
+  // ── reset_set_and_dependents ─────────────────────────────────────────
+
+  #[test]
+  fn reset_set_reverts_to_pending() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    let ready_set = state.sets.iter().find(|s| {
+      s.state == "pending"
+        && s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    if let Some(set) = ready_set {
+      let id = set.id;
+      sim.force_winner(id, 0, 2000).unwrap();
+      let after = sim.state(2000);
+      assert_eq!(after.sets.iter().find(|s| s.id == id).unwrap().state, "completed");
+      sim.reset_set_and_dependents(id, 3000).unwrap();
+      let reset = sim.state(3000);
+      let set_state = &reset.sets.iter().find(|s| s.id == id).unwrap().state;
+      assert_eq!(set_state, "pending");
+    }
+  }
+
+  // ── helpers ──────────────────────────────────────────────────────────
+
+  #[test]
+  fn next_power_of_two_works() {
+    assert_eq!(next_power_of_two(1), 1);
+    assert_eq!(next_power_of_two(2), 2);
+    assert_eq!(next_power_of_two(3), 4);
+    assert_eq!(next_power_of_two(5), 8);
+    assert_eq!(next_power_of_two(8), 8);
+    assert_eq!(next_power_of_two(9), 16);
+  }
+
+  #[test]
+  fn seed_positions_correct_for_4() {
+    let positions = seed_positions(4);
+    // For 4 entrants: [1, 4, 2, 3] or similar seeding pattern
+    assert_eq!(positions.len(), 4);
+    let mut sorted = positions.clone();
+    sorted.sort();
+    assert_eq!(sorted, vec![1, 2, 3, 4]);
+  }
+
+  #[test]
+  fn raw_response_is_valid_json() {
+    let mut sim = make_sim(4);
+    let raw = sim.raw_response(1000, None);
+    // Should have event and sets data
+    assert!(raw.get("data").is_some(), "raw response should have data key");
+  }
+}

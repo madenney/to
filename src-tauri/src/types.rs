@@ -319,11 +319,8 @@ pub struct DolphinConfig {
 // ── CDP types ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct CdpTarget {
-    pub id: Option<String>,
     pub title: Option<String>,
-    pub url: Option<String>,
     #[serde(rename = "type")]
     pub kind: Option<String>,
     #[serde(rename = "webSocketDebuggerUrl")]

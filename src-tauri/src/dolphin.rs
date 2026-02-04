@@ -160,10 +160,11 @@ pub fn find_new_dolphin_cmdline_any(
         let mut new: Vec<u32> = current.difference(before).copied().collect();
         if !new.is_empty() {
             new.sort_unstable();
-            let pid = *new.last().unwrap();
-            let cmdline = read_proc_cmdline(pid)?;
-            if !cmdline.is_empty() {
-                return Ok(Some((pid, cmdline)));
+            if let Some(&pid) = new.last() {
+                let cmdline = read_proc_cmdline(pid)?;
+                if !cmdline.is_empty() {
+                    return Ok(Some((pid, cmdline)));
+                }
             }
         }
         if start.elapsed() >= timeout {
@@ -922,7 +923,7 @@ pub fn launch_dolphin_for_setup(setup_id: u32, store: State<'_, SharedSetupStore
     let (existing, existing_pid) = {
         let mut guard = store.lock().map_err(|e| e.to_string())?;
         if !guard.setups.iter().any(|s| s.id == setup_id) {
-            return Err("Setup not found".to_string());
+            return Err("Setup not found.".to_string());
         }
         (
             guard.processes.remove(&setup_id),

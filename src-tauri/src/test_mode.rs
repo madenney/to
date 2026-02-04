@@ -11,7 +11,7 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Command, ChildStdout, ChildStderr, Stdio},
     thread::sleep,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -406,6 +406,277 @@ pub fn test_mode_bracket_streams(guard: &mut TestModeState) -> Result<Vec<Slippi
     Ok(streams)
 }
 
+// ── Shared spoof helpers ────────────────────────────────────────────────
+
+/// Spawn a background thread that reads stdout from the Node spoof script,
+/// emits progress events, and cleans up state when done.
+fn spawn_stdout_reader(stdout: ChildStdout, app: tauri::AppHandle, set_id: u64) {
+    std::thread::spawn(move || {
+        let shared = app.state::<SharedTestState>().inner().clone();
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().flatten() {
+            {
+                let guard = shared
+                    .lock()
+                    .unwrap_or_else(|e| {
+                        eprintln!("stdout reader: mutex poisoned: {e}");
+                        e.into_inner()
+                    });
+                if guard.cancel_replay_sets.contains(&set_id) {
+                    break;
+                }
+            }
+            if let Some(payload) = line.strip_prefix("SPOOF_PROGRESS:") {
+                if let Ok(value) = serde_json::from_str::<Value>(payload) {
+                    if let Some(path) = value.get("replayPath").and_then(|v| v.as_str()) {
+                        let mut guard = shared
+                            .lock()
+                            .unwrap_or_else(|e| {
+                                eprintln!("stdout reader: mutex poisoned: {e}");
+                                e.into_inner()
+                            });
+                        guard.active_replay_paths.insert(set_id, PathBuf::from(path));
+                    }
+                    let _ = app.emit("spoof-replay-progress", &value);
+                    let is_done = value
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .map(|t| t == "complete")
+                        .unwrap_or(false);
+                    let replay_index = value.get("replayIndex").and_then(|v| v.as_u64());
+                    let replay_total = value.get("replayTotal").and_then(|v| v.as_u64());
+                    let payload_set_id = value.get("setId").and_then(|v| v.as_u64());
+                    let is_final = replay_index == replay_total && payload_set_id == Some(set_id);
+                    if is_done && is_final {
+                        let child;
+                        {
+                            let mut guard = shared
+                                .lock()
+                                .unwrap_or_else(|e| {
+                                    eprintln!("stdout reader: mutex poisoned: {e}");
+                                    e.into_inner()
+                                });
+                            guard.active_replay_sets.remove(&set_id);
+                            guard.active_replay_paths.remove(&set_id);
+                            guard.cancel_replay_sets.remove(&set_id);
+                            child = guard.active_replay_children.remove(&set_id);
+                        }
+                        if let Some(mut child) = child {
+                            let _ = child.wait();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Spawn a background thread that reads stderr from the Node spoof script
+/// and emits error events.
+fn spawn_stderr_reader(stderr: ChildStderr, app: tauri::AppHandle, set_id: u64) {
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().flatten() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let payload = json!({
+                "type": "error",
+                "setId": set_id,
+                "message": trimmed,
+            });
+            let _ = app.emit("spoof-replay-progress", payload);
+        }
+    });
+}
+
+/// Spawn the Node spoof script in stream mode. Writes the tasks JSON, launches
+/// the Node process, registers the child, and starts stdout/stderr reader threads.
+fn spawn_stream_spoof(
+    app: &tauri::AppHandle,
+    test_state: &State<'_, SharedTestState>,
+    set_id: u64,
+    tasks: Vec<Value>,
+    _spectate_dir: &PathBuf,
+    initial_replay_path: Option<PathBuf>,
+) -> Result<usize, String> {
+    let task_count = tasks.len();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let tasks_dir = repo_root().join("airlock").join("tmp");
+    fs::create_dir_all(&tasks_dir)
+        .map_err(|e| format!("create tasks folder {}: {e}", tasks_dir.display()))?;
+
+    let payload = json!({
+        "fps": 60,
+        "gapMs": replay_spoof_gap_ms(),
+        "sequential": true,
+        "streams": tasks,
+    });
+    let tasks_path = tasks_dir.join(format!("spoof_set_{set_id}_{now}.json"));
+    let tasks_json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
+    fs::write(&tasks_path, tasks_json)
+        .map_err(|e| format!("write tasks {}: {e}", tasks_path.display()))?;
+
+    let script_path = repo_root().join("scripts").join("spoof_live_games.js");
+    if !script_path.is_file() {
+        return Err(format!("spoof script not found at {}", script_path.display()));
+    }
+
+    let node_path = build_node_path()?;
+    let mut cmd = Command::new("node");
+    cmd.arg(script_path)
+        .arg("--tasks")
+        .arg(&tasks_path)
+        .env("NODE_PATH", node_path)
+        .current_dir(repo_root())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("start spoof script: {e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    {
+        let mut guard = test_state.lock().map_err(|e| e.to_string())?;
+        guard.active_replay_sets.insert(set_id);
+        if let Some(path) = initial_replay_path {
+            guard.active_replay_paths.insert(set_id, path);
+        } else {
+            guard.active_replay_paths.remove(&set_id);
+        }
+        guard.active_replay_children.insert(set_id, child);
+    }
+
+    if let Some(stdout) = stdout {
+        spawn_stdout_reader(stdout, app.clone(), set_id);
+    }
+    if let Some(stderr) = stderr {
+        spawn_stderr_reader(stderr, app.clone(), set_id);
+    }
+
+    Ok(task_count)
+}
+
+/// Spawn the copy loop on a background thread so it doesn't block the UI.
+/// For multi-replay sets: copies each replay with a gap between them.
+fn spawn_copy_spoof(
+    app: &tauri::AppHandle,
+    test_state: &State<'_, SharedTestState>,
+    set_id: u64,
+    valid_paths: Vec<PathBuf>,
+    spectate_dir: PathBuf,
+    gap_ms: u64,
+) -> Result<(), String> {
+    {
+        let mut guard = test_state.lock().map_err(|e| e.to_string())?;
+        guard.active_replay_sets.insert(set_id);
+    }
+
+    let app = app.clone();
+    let shared = app.state::<SharedTestState>().inner().clone();
+    let replay_total = valid_paths.len();
+
+    std::thread::spawn(move || {
+        let base_time: DateTime<Local> = SystemTime::now().into();
+
+        for (idx, path) in valid_paths.iter().enumerate() {
+            {
+                let guard = shared
+                    .lock()
+                    .unwrap_or_else(|e| {
+                        eprintln!("copy spoof: mutex poisoned: {e}");
+                        e.into_inner()
+                    });
+                if guard.cancel_replay_sets.contains(&set_id) {
+                    break;
+                }
+            }
+            {
+                let mut guard = shared
+                    .lock()
+                    .unwrap_or_else(|e| {
+                        eprintln!("copy spoof: mutex poisoned: {e}");
+                        e.into_inner()
+                    });
+                guard.active_replay_paths.insert(set_id, path.clone());
+            }
+            let timestamp = base_time + ChronoDuration::seconds(idx as i64);
+            let base_name = format_game_name(timestamp);
+            let output_path = unique_spectate_path(&spectate_dir, &base_name, idx);
+            let replay_index = idx + 1;
+            let start_payload = json!({
+                "type": "start",
+                "setId": set_id,
+                "replayIndex": replay_index,
+                "replayTotal": replay_total,
+                "replayPath": path.to_string_lossy(),
+                "outputPath": output_path.to_string_lossy(),
+            });
+            let _ = app.emit("spoof-replay-progress", start_payload);
+            if let Err(e) = fs::copy(path, &output_path) {
+                let payload = json!({
+                    "type": "error",
+                    "setId": set_id,
+                    "message": format!(
+                        "copy replay {} -> {}: {e}",
+                        path.display(),
+                        output_path.display()
+                    ),
+                });
+                let _ = app.emit("spoof-replay-progress", payload);
+                break;
+            }
+            let event_type = if replay_index == replay_total {
+                "complete"
+            } else {
+                "progress"
+            };
+            let payload = json!({
+                "type": event_type,
+                "setId": set_id,
+                "replayIndex": replay_index,
+                "replayTotal": replay_total,
+                "replayPath": path.to_string_lossy(),
+                "outputPath": output_path.to_string_lossy(),
+            });
+            let _ = app.emit("spoof-replay-progress", payload);
+            if replay_index < replay_total && gap_ms > 0 {
+                sleep(Duration::from_millis(gap_ms));
+            }
+        }
+
+        // Clean up state
+        let mut guard = shared
+            .lock()
+            .unwrap_or_else(|e| {
+                eprintln!("copy spoof: mutex poisoned: {e}");
+                e.into_inner()
+            });
+        guard.active_replay_sets.remove(&set_id);
+        guard.active_replay_paths.remove(&set_id);
+    });
+
+    Ok(())
+}
+
+/// Shared preamble: check test mode, load config, resolve and create spectate dir.
+fn spoof_preamble() -> Result<(PathBuf,), String> {
+    if !app_test_mode_enabled() {
+        return Err("Test mode is disabled in settings.".to_string());
+    }
+    let config = load_config_inner()?;
+    let spectate_raw = config.spectate_folder_path.trim();
+    if spectate_raw.is_empty() {
+        return Err("Spectate folder path is not set in settings.".to_string());
+    }
+    let spectate_dir = resolve_repo_path(spectate_raw);
+    fs::create_dir_all(&spectate_dir)
+        .map_err(|e| format!("create spectate folder {}: {e}", spectate_dir.display()))?;
+    Ok((spectate_dir,))
+}
+
 // ── Tauri commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -492,20 +763,11 @@ pub fn spoof_bracket_set_replays(
     set_id: u64,
     test_state: State<'_, SharedTestState>,
 ) -> Result<SpoofReplayResult, String> {
-    if !app_test_mode_enabled() {
-        return Err("Test mode is disabled in settings.".to_string());
-    }
-    if let Ok(mut guard) = test_state.lock() {
+    let (spectate_dir,) = spoof_preamble()?;
+    {
+        let mut guard = test_state.lock().map_err(|e| e.to_string())?;
         guard.cancel_replay_sets.remove(&set_id);
     }
-    let config = load_config_inner()?;
-    let spectate_raw = config.spectate_folder_path.trim();
-    if spectate_raw.is_empty() {
-        return Err("Spectate folder path is not set in settings.".to_string());
-    }
-    let spectate_dir = resolve_repo_path(spectate_raw);
-    fs::create_dir_all(&spectate_dir)
-        .map_err(|e| format!("create spectate folder {}: {e}", spectate_dir.display()))?;
 
     let replay_paths = read_bracket_set_replay_paths(&config_path, set_id)?;
     let mut missing = 0usize;
@@ -523,204 +785,48 @@ pub fn spoof_bracket_set_replays(
 
     let valid_paths = sort_replay_paths_by_start_time(valid_paths);
     let replay_total = valid_paths.len();
+
     if replay_spoof_mode() == ReplaySpoofMode::Copy {
-        let gap_ms = replay_spoof_gap_ms();
-        {
-            let mut guard = test_state.lock().map_err(|e| e.to_string())?;
-            guard.active_replay_sets.insert(set_id);
-        }
-        let copy_result: Result<SpoofReplayResult, String> = (|| {
-            let base_time: DateTime<Local> = SystemTime::now().into();
-            for (idx, path) in valid_paths.iter().enumerate() {
-                if let Ok(guard) = test_state.lock() {
-                    if guard.cancel_replay_sets.contains(&set_id) {
-                        return Err("Replay spoof cancelled.".to_string());
-                    }
-                }
-                if let Ok(mut guard) = test_state.lock() {
-                    guard.active_replay_paths.insert(set_id, path.clone());
-                }
-                let timestamp = base_time + ChronoDuration::seconds(idx as i64);
-                let base_name = format_game_name(timestamp);
-                let output_path = unique_spectate_path(&spectate_dir, &base_name, idx);
-                let replay_index = idx + 1;
-                let start_payload = json!({
-                    "type": "start",
-                    "setId": set_id,
-                    "replayIndex": replay_index,
-                    "replayTotal": replay_total,
-                    "replayPath": path.to_string_lossy(),
-                    "outputPath": output_path.to_string_lossy(),
-                });
-                let _ = app_handle.emit("spoof-replay-progress", start_payload);
-                fs::copy(path, &output_path).map_err(|e| {
-                    format!(
-                        "copy replay {} -> {}: {e}",
-                        path.display(),
-                        output_path.display()
-                    )
-                })?;
-                let event_type = if replay_index == replay_total {
-                    "complete"
-                } else {
-                    "progress"
-                };
-                let payload = json!({
-                    "type": event_type,
-                    "setId": set_id,
-                    "replayIndex": replay_index,
-                    "replayTotal": replay_total,
-                    "replayPath": path.to_string_lossy(),
-                    "outputPath": output_path.to_string_lossy(),
-                });
-                let _ = app_handle.emit("spoof-replay-progress", payload);
-                if replay_index == replay_total {
-                    if let Ok(mut guard) = test_state.lock() {
-                        guard.active_replay_sets.remove(&set_id);
-                        guard.active_replay_paths.remove(&set_id);
-                    }
-                } else if gap_ms > 0 {
-                    sleep(Duration::from_millis(gap_ms));
-                }
-            }
-            Ok(SpoofReplayResult {
-                started: replay_total,
-                missing,
+        spawn_copy_spoof(
+            &app_handle,
+            &test_state,
+            set_id,
+            valid_paths,
+            spectate_dir,
+            replay_spoof_gap_ms(),
+        )?;
+        return Ok(SpoofReplayResult {
+            started: replay_total,
+            missing,
+        });
+    }
+
+    let tasks: Vec<Value> = valid_paths
+        .into_iter()
+        .enumerate()
+        .map(|(idx, path)| {
+            json!({
+                "replayPath": path.to_string_lossy(),
+                "outputDir": spectate_dir.to_string_lossy(),
+                "fps": 60,
+                "setId": set_id,
+                "replayIndex": idx + 1,
+                "replayTotal": replay_total,
             })
-        })();
-        if copy_result.is_err() {
-            if let Ok(mut guard) = test_state.lock() {
-                guard.active_replay_sets.remove(&set_id);
-                guard.active_replay_paths.remove(&set_id);
-            }
-        }
-        return copy_result;
-    }
+        })
+        .collect();
 
-    let mut tasks: Vec<Value> = Vec::new();
-    for (idx, path) in valid_paths.into_iter().enumerate() {
-        tasks.push(json!({
-            "replayPath": path.to_string_lossy(),
-            "outputDir": spectate_dir.to_string_lossy(),
-            "fps": 60,
-            "setId": set_id,
-            "replayIndex": idx + 1,
-            "replayTotal": replay_total,
-        }));
-    }
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let tasks_dir = repo_root().join("airlock").join("tmp");
-    fs::create_dir_all(&tasks_dir)
-        .map_err(|e| format!("create tasks folder {}: {e}", tasks_dir.display()))?;
-
-    let payload = json!({
-        "fps": 60,
-        "gapMs": replay_spoof_gap_ms(),
-        "sequential": true,
-        "streams": tasks,
-    });
-    let tasks_path = tasks_dir.join(format!("spoof_set_{set_id}_{now}.json"));
-    let tasks_json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
-    fs::write(&tasks_path, tasks_json)
-        .map_err(|e| format!("write tasks {}: {e}", tasks_path.display()))?;
-
-    let script_path = repo_root().join("scripts").join("spoof_live_games.js");
-    if !script_path.is_file() {
-        return Err(format!("spoof script not found at {}", script_path.display()));
-    }
-
-    let node_path = build_node_path()?;
-    let mut cmd = Command::new("node");
-    cmd.arg(script_path)
-        .arg("--tasks")
-        .arg(&tasks_path)
-        .env("NODE_PATH", node_path)
-        .current_dir(repo_root())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("start spoof script: {e}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    {
-        let mut guard = test_state.lock().map_err(|e| e.to_string())?;
-        guard.active_replay_sets.insert(set_id);
-        guard.active_replay_paths.remove(&set_id);
-        guard.active_replay_children.insert(set_id, child);
-    }
-
-    if let Some(stdout) = stdout {
-        let app = app_handle.clone();
-        let set_id = set_id;
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().flatten() {
-                if let Ok(guard) = app.state::<SharedTestState>().lock() {
-                    if guard.cancel_replay_sets.contains(&set_id) {
-                        break;
-                    }
-                }
-                if let Some(payload) = line.strip_prefix("SPOOF_PROGRESS:") {
-                    if let Ok(value) = serde_json::from_str::<Value>(payload) {
-                        if let Some(path) = value.get("replayPath").and_then(|v| v.as_str()) {
-                            if let Ok(mut guard) = app.state::<SharedTestState>().lock() {
-                                guard.active_replay_paths.insert(set_id, PathBuf::from(path));
-                            }
-                        }
-                        let _ = app.emit("spoof-replay-progress", &value);
-                        let is_done = value
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            .map(|t| t == "complete")
-                            .unwrap_or(false);
-                        let replay_index = value.get("replayIndex").and_then(|v| v.as_u64());
-                        let replay_total = value.get("replayTotal").and_then(|v| v.as_u64());
-                        let payload_set_id = value.get("setId").and_then(|v| v.as_u64());
-                        if is_done && replay_index == replay_total && payload_set_id == Some(set_id) {
-                            let mut child = None;
-                            if let Ok(mut guard) = app.state::<SharedTestState>().lock() {
-                                guard.active_replay_sets.remove(&set_id);
-                                guard.active_replay_paths.remove(&set_id);
-                                guard.cancel_replay_sets.remove(&set_id);
-                                child = guard.active_replay_children.remove(&set_id);
-                            }
-                            if let Some(mut child) = child {
-                                let _ = child.wait();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    if let Some(stderr) = stderr {
-        let app = app_handle.clone();
-        let set_id = set_id;
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().flatten() {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let payload = json!({
-                    "type": "error",
-                    "setId": set_id,
-                    "message": trimmed,
-                });
-                let _ = app.emit("spoof-replay-progress", payload);
-            }
-        });
-    }
-
-    // stderr is already handled above
+    let started = spawn_stream_spoof(
+        &app_handle,
+        &test_state,
+        set_id,
+        tasks,
+        &spectate_dir,
+        None,
+    )?;
 
     Ok(SpoofReplayResult {
-        started: tasks.len(),
+        started,
         missing,
     })
 }
@@ -734,34 +840,26 @@ pub fn spoof_bracket_set_replay(
     replay_total: u32,
     test_state: State<'_, SharedTestState>,
 ) -> Result<SpoofReplayResult, String> {
-    if !app_test_mode_enabled() {
-        return Err("Test mode is disabled in settings.".to_string());
-    }
-    if let Ok(mut guard) = test_state.lock() {
+    let (spectate_dir,) = spoof_preamble()?;
+    {
+        let mut guard = test_state.lock().map_err(|e| e.to_string())?;
         guard.cancel_replay_sets.remove(&set_id);
     }
-    let config = load_config_inner()?;
-    let spectate_raw = config.spectate_folder_path.trim();
-    if spectate_raw.is_empty() {
-        return Err("Spectate folder path is not set in settings.".to_string());
-    }
-    let spectate_dir = resolve_repo_path(spectate_raw);
-    fs::create_dir_all(&spectate_dir)
-        .map_err(|e| format!("create spectate folder {}: {e}", spectate_dir.display()))?;
 
-    let replay_path = replay_path.trim();
+    let replay_path = replay_path.trim().to_string();
     if replay_path.is_empty() {
         return Err("Replay path is empty.".to_string());
     }
-    let mut resolved = PathBuf::from(replay_path);
+    let mut resolved = PathBuf::from(&replay_path);
     if !resolved.is_absolute() {
-        resolved = resolve_repo_path(replay_path);
+        resolved = resolve_repo_path(&replay_path);
     }
     if !resolved.is_file() {
         return Err(format!("Replay not found at {}", resolved.display()));
     }
 
     if replay_spoof_mode() == ReplaySpoofMode::Copy {
+        // Single-replay copy is fast enough to do inline (no sleep needed).
         {
             let mut guard = test_state.lock().map_err(|e| e.to_string())?;
             guard.active_replay_sets.insert(set_id);
@@ -795,121 +893,31 @@ pub fn spoof_bracket_set_replay(
             "outputPath": output_path.to_string_lossy(),
         });
         let _ = app_handle.emit("spoof-replay-progress", payload);
-        if let Ok(mut guard) = test_state.lock() {
+        {
+            let mut guard = test_state.lock().map_err(|e| e.to_string())?;
             guard.active_replay_sets.remove(&set_id);
             guard.active_replay_paths.remove(&set_id);
         }
         return Ok(SpoofReplayResult { started: 1, missing: 0 });
     }
 
-    let tasks_dir = repo_root().join("airlock").join("tmp");
-    fs::create_dir_all(&tasks_dir)
-        .map_err(|e| format!("create tasks folder {}: {e}", tasks_dir.display()))?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let tasks_path = tasks_dir.join(format!("spoof_set_{set_id}_{now}.json"));
-    let payload = json!({
+    let tasks = vec![json!({
+        "replayPath": resolved.to_string_lossy(),
+        "outputDir": spectate_dir.to_string_lossy(),
         "fps": 60,
-        "streams": [{
-            "replayPath": resolved.to_string_lossy(),
-            "outputDir": spectate_dir.to_string_lossy(),
-            "fps": 60,
-            "setId": set_id,
-            "replayIndex": replay_index,
-            "replayTotal": replay_total,
-        }],
-    });
-    let tasks_json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
-    fs::write(&tasks_path, tasks_json)
-        .map_err(|e| format!("write tasks {}: {e}", tasks_path.display()))?;
+        "setId": set_id,
+        "replayIndex": replay_index,
+        "replayTotal": replay_total,
+    })];
 
-    let script_path = repo_root().join("scripts").join("spoof_live_games.js");
-    if !script_path.is_file() {
-        return Err(format!("spoof script not found at {}", script_path.display()));
-    }
-
-    let node_path = build_node_path()?;
-    let mut cmd = Command::new("node");
-    cmd.arg(script_path)
-        .arg("--tasks")
-        .arg(&tasks_path)
-        .env("NODE_PATH", node_path)
-        .current_dir(repo_root())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("start spoof script: {e}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    {
-        let mut guard = test_state.lock().map_err(|e| e.to_string())?;
-        guard.active_replay_sets.insert(set_id);
-        guard.active_replay_paths.insert(set_id, resolved.clone());
-        guard.active_replay_children.insert(set_id, child);
-    }
-
-    if let Some(stdout) = stdout {
-        let app = app_handle.clone();
-        let set_id = set_id;
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().flatten() {
-                if let Ok(guard) = app.state::<SharedTestState>().lock() {
-                    if guard.cancel_replay_sets.contains(&set_id) {
-                        break;
-                    }
-                }
-                if let Some(payload) = line.strip_prefix("SPOOF_PROGRESS:") {
-                    if let Ok(value) = serde_json::from_str::<Value>(payload) {
-                        if let Some(path) = value.get("replayPath").and_then(|v| v.as_str()) {
-                            if let Ok(mut guard) = app.state::<SharedTestState>().lock() {
-                                guard.active_replay_paths.insert(set_id, PathBuf::from(path));
-                            }
-                        }
-                        let _ = app.emit("spoof-replay-progress", &value);
-                        let is_done = value
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            .map(|t| t == "complete")
-                            .unwrap_or(false);
-                        if is_done {
-                            let mut child = None;
-                            if let Ok(mut guard) = app.state::<SharedTestState>().lock() {
-                                guard.active_replay_sets.remove(&set_id);
-                                guard.active_replay_paths.remove(&set_id);
-                                guard.cancel_replay_sets.remove(&set_id);
-                                child = guard.active_replay_children.remove(&set_id);
-                            }
-                            if let Some(mut child) = child {
-                                let _ = child.wait();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    if let Some(stderr) = stderr {
-        let app = app_handle.clone();
-        let set_id = set_id;
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().flatten() {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let payload = json!({
-                    "type": "error",
-                    "setId": set_id,
-                    "message": trimmed,
-                });
-                let _ = app.emit("spoof-replay-progress", payload);
-            }
-        });
-    }
+    spawn_stream_spoof(
+        &app_handle,
+        &test_state,
+        set_id,
+        tasks,
+        &spectate_dir,
+        Some(resolved),
+    )?;
 
     Ok(SpoofReplayResult { started: 1, missing: 0 })
 }

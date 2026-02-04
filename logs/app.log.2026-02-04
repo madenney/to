@@ -1,0 +1,10 @@
+2026-02-04T05:12:32.549424Z  INFO new_melee_stream_tool_lib: Melee Stream Tool starting
+2026-02-04T05:12:32.701756Z  INFO new_melee_stream_tool_lib: Dual overlay server listening at http://127.0.0.1:17892/
+2026-02-04T05:12:32.701756Z  INFO new_melee_stream_tool_lib: Main overlay server listening at http://127.0.0.1:17890/
+2026-02-04T05:12:32.701756Z  INFO new_melee_stream_tool_lib: Quad overlay server listening at http://127.0.0.1:17893/
+2026-02-04T05:12:32.701768Z  INFO new_melee_stream_tool_lib: Upcoming overlay server listening at http://127.0.0.1:17891/
+2026-02-04T05:23:16.498572Z  INFO new_melee_stream_tool_lib: Melee Stream Tool starting
+2026-02-04T05:23:16.633441Z  INFO new_melee_stream_tool_lib: Upcoming overlay server listening at http://127.0.0.1:17891/
+2026-02-04T05:23:16.633441Z  INFO new_melee_stream_tool_lib: Main overlay server listening at http://127.0.0.1:17890/
+2026-02-04T05:23:16.633444Z  INFO new_melee_stream_tool_lib: Quad overlay server listening at http://127.0.0.1:17893/
+2026-02-04T05:23:16.633444Z  INFO new_melee_stream_tool_lib: Dual overlay server listening at http://127.0.0.1:17892/

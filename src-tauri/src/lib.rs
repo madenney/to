@@ -33,6 +33,8 @@ use axum::{
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use tauri::{path::BaseDirectory, Manager, State};
+use tracing::{info, warn, error};
+use tracing_subscriber::EnvFilter;
 
 // ── Setup CRUD commands ────────────────────────────────────────────────
 
@@ -304,7 +306,7 @@ fn list_bracket_replay_pairs(config_path: String) -> Result<Vec<String>, String>
                         }
                     }
                 }
-                if unique.len() < 2 {
+                if unique.len() != 2 {
                     continue;
                 }
                 let key = config::replay_pair_key(&unique[0], &unique[1]);
@@ -411,11 +413,17 @@ async fn start_overlay_server(
     label: &str,
 ) {
     let app = overlay_router(state, static_dir, resources_dir);
-    let listener = TcpListener::bind(addr)
-        .await
-        .unwrap_or_else(|e| panic!("bind {addr}: {e}"));
-    println!("{label} overlay server at http://{addr}/ (open /index.html)");
-    axum::serve(listener, app).await.expect("serve axum");
+    let listener = match TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            error!("{label} overlay server failed to bind {addr}: {e}");
+            return;
+        }
+    };
+    info!("{label} overlay server listening at http://{addr}/");
+    if let Err(e) = axum::serve(listener, app).await {
+        error!("{label} overlay server error: {e}");
+    }
 }
 
 async fn get_overlay_state_json(AxumState(state): AxumState<OverlayServerState>) -> impl IntoResponse {
@@ -469,6 +477,23 @@ async fn get_overlay_state_json(AxumState(state): AxumState<OverlayServerState>)
 
 pub fn run() {
     load_env_file();
+
+    // Initialize tracing with file + stderr output
+    let logs_dir = repo_root().join("logs");
+    fs::create_dir_all(&logs_dir).ok();
+    let file_appender = tracing_appender::rolling::daily(&logs_dir, "app.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .init();
+    info!("Melee Stream Tool starting");
+    log_env_warnings();
+
     let setup_store: SharedSetupStore = Arc::new(Mutex::new(SetupStore::bootstrap_from_existing()));
     let test_state: SharedTestState = Arc::new(Mutex::new(TestModeState::default()));
     let live_startgg: SharedLiveStartgg = Arc::new(Mutex::new(LiveStartggState::default()));

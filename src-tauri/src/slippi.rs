@@ -496,7 +496,7 @@ pub fn assign_stream_to_setup(
   let (changed_assignments, processes_to_stop, pids_to_stop, updated_setups) = {
     let mut guard = store.lock().map_err(|e| e.to_string())?;
     if !guard.setups.iter().any(|s| s.id == setup_id) {
-      return Err("Setup not found".to_string());
+      return Err("Setup not found.".to_string());
     }
 
     let target_prev_stream = guard
@@ -543,7 +543,7 @@ pub fn assign_stream_to_setup(
         .setups
         .iter_mut()
         .find(|s| s.id == *id)
-        .ok_or_else(|| "Setup not found".to_string())?;
+        .ok_or_else(|| "Setup not found.".to_string())?;
       let prev_id = setup.assigned_stream.as_ref().map(|s| s.id.clone());
       let prev_playing = setup.assigned_stream.as_ref().and_then(|s| s.is_playing);
       let prev_replay = setup.assigned_stream.as_ref().and_then(|s| s.replay_path.clone());
@@ -751,7 +751,7 @@ pub fn clear_setup_assignment(
       .setups
       .iter_mut()
       .find(|s| s.id == setup_id)
-      .ok_or_else(|| "Setup not found".to_string())?;
+      .ok_or_else(|| "Setup not found.".to_string())?;
     setup.assigned_stream = None;
     let cloned = setup.clone();
     let (existing, existing_pid) = if should_stop {

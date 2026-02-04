@@ -27,11 +27,7 @@ export default function App() {
   }, []);
 
   // ── Config hook ─────────────────────────────────────────────────────────
-  const configHook = useConfig(isBracketView, {
-    resetBracketState: undefined as any, // wired below via effect
-    setTopStatus: undefined as any,
-    setBracketStatus: undefined as any,
-  });
+  const configHook = useConfig(isBracketView);
 
   // ── Setups hook ─────────────────────────────────────────────────────────
   const setupsHook = useSetups(isBracketView);
@@ -70,9 +66,15 @@ export default function App() {
 
   // ── Cross-hook wiring ───────────────────────────────────────────────────
 
-  // Wire config deps that require bracket/stream hooks (circular ref workaround)
+  // Wire callback refs from useConfig to functions from useBracket/useStreams
   useEffect(() => {
-    // This effect handles the initial load for the main view
+    configHook.resetBracketStateRef.current = bracketHook.resetBracketState;
+    configHook.setTopStatusRef.current = streamsHook.setTopStatus;
+    configHook.setBracketStatusRef.current = bracketHook.setBracketStatus;
+  });
+
+  // Initial load for the main view
+  useEffect(() => {
     if (isBracketView) return;
     setupsHook.loadSetups();
     streamsHook.refreshStreams();

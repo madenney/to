@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
@@ -47,15 +47,14 @@ export type UseConfigReturn = {
   pollStartggCycle: () => Promise<void>;
   loadBracketConfigs: () => Promise<void>;
   handleBracketSelect: (path: string) => Promise<void>;
+  /** Callback refs — set these after all hooks are initialized to break circular deps */
+  resetBracketStateRef: React.MutableRefObject<((pathOverride?: string, autoCompleteOverride?: boolean) => Promise<void>) | null>;
+  setTopStatusRef: React.MutableRefObject<((status: string) => void) | null>;
+  setBracketStatusRef: React.MutableRefObject<((status: string) => void) | null>;
 };
 
 export function useConfig(
   isBracketView: boolean,
-  deps?: {
-    resetBracketState?: (pathOverride?: string, autoCompleteOverride?: boolean) => Promise<void>;
-    setTopStatus?: (status: string) => void;
-    setBracketStatus?: (status: string) => void;
-  },
 ): UseConfigReturn {
   const [config, setConfig] = useState<AppConfig>({
     dolphinPath: "",
@@ -84,6 +83,11 @@ export function useConfig(
   const [startggLiveLoading, setStartggLiveLoading] = useState(false);
   const [startggPollLoading, setStartggPollLoading] = useState(false);
   const startggPollInFlight = useRef(false);
+
+  // Callback refs to break circular dependency with useBracket/useStreams
+  const resetBracketStateRef = useRef<((pathOverride?: string, autoCompleteOverride?: boolean) => Promise<void>) | null>(null);
+  const setTopStatusRef = useRef<((status: string) => void) | null>(null);
+  const setBracketStatusRef = useRef<((status: string) => void) | null>(null);
 
   const currentStartggState = useMemo(
     () => (config.testMode ? testStartggState : liveStartggState),
@@ -210,7 +214,7 @@ export function useConfig(
       return normalized;
     } catch (e) {
       const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
-      deps?.setTopStatus?.(`Test bracket update failed: ${msg}`);
+      setTopStatusRef.current?.(`Test bracket update failed: ${msg}`);
       return null;
     }
   }
@@ -243,7 +247,7 @@ export function useConfig(
         return;
       }
       if (!startggLinkProvided) {
-        deps?.setTopStatus?.("Add a Start.gg event link in Settings before polling.");
+        setTopStatusRef.current?.("Add a Start.gg event link in Settings before polling.");
         return;
       }
       await refreshLiveStartggState(true);
@@ -263,7 +267,7 @@ export function useConfig(
     } catch (e) {
       const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
       if (isBracketView) {
-        deps?.setBracketStatus?.(`Load bracket configs failed: ${msg}`);
+        setBracketStatusRef.current?.(`Load bracket configs failed: ${msg}`);
       } else {
         setConfigStatus(`Load bracket configs failed: ${msg}`);
       }
@@ -276,7 +280,7 @@ export function useConfig(
     const nextConfig = { ...config, testBracketPath: normalized };
     setConfig(nextConfig);
     await saveConfig(nextConfig);
-    await deps?.resetBracketState?.(normalized);
+    await resetBracketStateRef.current?.(normalized);
   }
 
   // Auto-focus start.gg inputs
@@ -381,5 +385,8 @@ export function useConfig(
     pollStartggCycle,
     loadBracketConfigs,
     handleBracketSelect,
+    resetBracketStateRef,
+    setTopStatusRef,
+    setBracketStatusRef,
   };
 }
