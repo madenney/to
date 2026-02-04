@@ -4,6 +4,11 @@ export type Setup = {
   assignedStream?: SlippiStream | null;
 };
 
+export type AssignStreamResult = {
+  setups: Setup[];
+  warning?: string | null;
+};
+
 export type SlippiStream = {
   id: string;
   windowTitle?: string | null;
@@ -11,16 +16,20 @@ export type SlippiStream = {
   p2Tag?: string | null;
   p1Code?: string | null;
   p2Code?: string | null;
+  startggEntrantId?: number | null;
+  replayPath?: string | null;
+  isPlaying?: boolean | null;
   source?: string | null;
+  startggSet?: StartggSimSet | null;
 };
 
 export type SlippiWindowInfo = {
   id: number;
   title?: string | null;
-  x: i32;
-  y: i32;
-  width: u32;
-  height: u32;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   screen?: number;
 };
 
@@ -29,6 +38,10 @@ export type AppConfig = {
   ssbmIsoPath: string;
   slippiLauncherPath: string;
   spectateFolderPath: string;
+  startggLink: string;
+  startggToken: string;
+  startggPolling: boolean;
+  autoStream: boolean;
   testMode: boolean;
   testBracketPath: string;
   autoCompleteBracket: boolean;
@@ -53,6 +66,12 @@ export type StartggSimEntrant = {
   slippiCode: string;
 };
 
+export type BroadcastPlayerSelection = {
+  id: number;
+  name: string;
+  slippiCode: string;
+};
+
 export type StartggSimSlot = {
   entrantId?: number | null;
   entrantName?: string | null;
@@ -60,6 +79,9 @@ export type StartggSimSlot = {
   seed?: number | null;
   score?: number | null;
   result?: string | null;
+  sourceType?: string | null;
+  sourceSetId?: number | null;
+  sourceLabel?: string | null;
 };
 
 export type StartggSimSet = {
@@ -85,6 +107,12 @@ export type StartggSimState = {
   startedAtMs: number;
   nowMs: number;
   eventLink?: string | null;
+};
+
+export type StartggLiveSnapshot = {
+  state?: StartggSimState | null;
+  lastError?: string | null;
+  lastFetchMs?: number | null;
 };
 
 export type BracketConfigInfo = {

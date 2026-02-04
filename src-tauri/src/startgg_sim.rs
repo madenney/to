@@ -130,7 +130,7 @@ pub struct StartggSimEntrant {
   pub slippi_code: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartggSimSlot {
   pub entrant_id: Option<u32>,
@@ -139,9 +139,12 @@ pub struct StartggSimSlot {
   pub seed: Option<u32>,
   pub score: Option<u8>,
   pub result: Option<String>,
+  pub source_type: Option<String>,
+  pub source_set_id: Option<u64>,
+  pub source_label: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartggSimSet {
   pub id: u64,
@@ -267,6 +270,13 @@ struct ResolvedOutcome {
   winner_slot: usize,
   scores: [u8; 2],
   dq_slot: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ReferenceSetOutcome {
+  pub winner_slot: usize,
+  pub scores: [u8; 2],
+  pub dq_slot: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -659,6 +669,46 @@ impl StartggSim {
     Ok(())
   }
 
+  pub fn update_set_scores_manual(
+    &mut self,
+    set_id: u64,
+    scores: [u8; 2],
+    now_ms: u64,
+  ) -> Result<(), String> {
+    let index = self
+      .set_index
+      .get(&set_id)
+      .copied()
+      .ok_or_else(|| "Set not found.".to_string())?;
+    let set = &mut self.sets[index];
+    if matches!(set.state, SimSetState::Completed | SimSetState::Skipped) {
+      return Err("Set is already completed.".to_string());
+    }
+    if set.slots.iter().any(|slot| slot.entrant_id.is_none()) {
+      return Err("Set is missing entrants.".to_string());
+    }
+    let games_to_win = games_to_win(set.best_of);
+    let clamp = |score: u8| if score > games_to_win { games_to_win } else { score };
+    let next_scores = [clamp(scores[0]), clamp(scores[1])];
+
+    for (idx, score) in next_scores.iter().enumerate().take(2) {
+      set.slots[idx].score = Some(*score);
+      set.slots[idx].result = None;
+    }
+    set.winner_slot = None;
+    set.loser_slot = None;
+    set.completed_at_ms = None;
+
+    if set.state == SimSetState::Pending && (next_scores[0] > 0 || next_scores[1] > 0) {
+      set.state = SimSetState::InProgress;
+      set.started_at_ms = Some(now_ms);
+      set.end_at_ms = None;
+    }
+
+    set.updated_at_ms = now_ms;
+    Ok(())
+  }
+
   pub fn finish_set_manual(
     &mut self,
     set_id: u64,
@@ -936,6 +986,24 @@ impl StartggSim {
     }
 
     Ok(())
+  }
+
+  pub fn reference_outcome_for_set(&self, set_id: u64) -> Option<ReferenceSetOutcome> {
+    if self.config.reference_sets.is_empty() {
+      return None;
+    }
+    let set = self.get_set(set_id)?;
+    let outcomes = self.build_reference_outcomes();
+    for outcome in outcomes {
+      if let Some(resolved) = Self::match_reference_to_set(&outcome, set) {
+        return Some(ReferenceSetOutcome {
+          winner_slot: resolved.winner_slot,
+          scores: resolved.scores,
+          dq_slot: resolved.dq_slot,
+        });
+      }
+    }
+    None
   }
 
   fn build_reference_outcomes(&self) -> Vec<ReferenceOutcome> {
@@ -1269,6 +1337,32 @@ impl StartggSim {
           .iter()
           .map(|slot| {
             let entrant = slot.entrant_id.and_then(|id| self.entrants_by_id.get(&id));
+            let (source_type, source_set_id, source_label) = match slot.source {
+              SlotSource::Winner(set_id) => {
+                let label = self
+                  .get_set(set_id)
+                  .map(|set| set.round_label.clone())
+                  .unwrap_or_else(|| format!("Set {set_id}"));
+                (
+                  Some("winner".to_string()),
+                  Some(set_id),
+                  Some(format!("Winner of {label}")),
+                )
+              }
+              SlotSource::Loser(set_id) => {
+                let label = self
+                  .get_set(set_id)
+                  .map(|set| set.round_label.clone())
+                  .unwrap_or_else(|| format!("Set {set_id}"));
+                (
+                  Some("loser".to_string()),
+                  Some(set_id),
+                  Some(format!("Loser of {label}")),
+                )
+              }
+              SlotSource::Empty => (Some("empty".to_string()), None, Some("TBD".to_string())),
+              SlotSource::Entrant(_) => (None, None, None),
+            };
             StartggSimSlot {
               entrant_id: slot.entrant_id,
               entrant_name: entrant.map(|e| e.name.clone()),
@@ -1280,6 +1374,9 @@ impl StartggSim {
                 SlotResult::Loss => "loss".to_string(),
                 SlotResult::Dq => "dq".to_string(),
               }),
+              source_type,
+              source_set_id,
+              source_label,
             }
           })
           .collect();
@@ -1386,7 +1483,10 @@ fn startgg_state_to_raw(state: &StartggSimState, now_ms: u64) -> Value {
               "stats": {
                 "score": { "value": slot.score, "label": score_label }
               }
-            }
+            },
+            "sourceType": slot.source_type,
+            "sourceSetId": slot.source_set_id,
+            "sourceLabel": slot.source_label
           })
         })
         .collect::<Vec<_>>();
@@ -1437,8 +1537,8 @@ fn startgg_state_to_raw(state: &StartggSimState, now_ms: u64) -> Value {
 fn state_code(state: &str) -> i32 {
   match state {
     "pending" => 1,
-    "inProgress" => 3,
-    "completed" => 4,
+    "inProgress" => 2,
+    "completed" => 3,
     "skipped" => 6,
     _ => 1,
   }

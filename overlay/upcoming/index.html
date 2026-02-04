@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upcoming Match</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <link rel="stylesheet" href="/style.css?v=mainstyle" />
+  </head>
+  <body>
+    <div class="stage">
+      <div class="meta">
+        <div class="pill">Upcoming Match</div>
+        <div class="round" id="round">Next up</div>
+      </div>
+
+      <section class="versus">
+        <div class="side left">
+          <img class="portrait" id="p1img" alt="" aria-hidden="true" />
+          <div class="tag" id="p1name">Player One</div>
+        </div>
+
+        <div class="vs">VS</div>
+
+        <div class="side right">
+          <img class="portrait mirror" id="p2img" alt="" aria-hidden="true" />
+          <div class="tag" id="p2name">Player Two</div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function normalizeCharacterName(name) {
+        if (!name) return name;
+        if (name === "Shiek") return "Sheik";
+        return name;
+      }
+
+      function portraitPath(character, color) {
+        if (!character || !color) return "";
+        const clean = normalizeCharacterName(character);
+        const encChar = encodeURIComponent(clean);
+        const encColor = encodeURIComponent(color + ".png");
+        return `/resources/characters/portraits/${encChar}/${encColor}`;
+      }
+
+      function setupIndexFromQuery() {
+        const params = new URLSearchParams(window.location.search);
+        const val = Number(params.get("setup"));
+        if (Number.isFinite(val) && val >= 1 && val <= 16) return val - 1;
+        return 0;
+      }
+
+      function setImg(imgEl, src, label) {
+        if (!imgEl) return;
+        if (!src) {
+          imgEl.removeAttribute("src");
+          imgEl.style.display = "none";
+          return;
+        }
+        imgEl.style.display = "";
+        imgEl.src = src;
+        imgEl.onerror = () => {
+          console.warn(`[upcoming overlay] ${label} portrait failed to load:`, src);
+          imgEl.style.display = "none";
+        };
+        imgEl.onload = () => { imgEl.style.display = ""; };
+      }
+
+      function fitTag(el) {
+        if (!el || !el.clientWidth) return;
+        // Reset to stylesheet default so we can grow back if space allows
+        el.style.fontSize = "";
+        let size = parseFloat(getComputedStyle(el).fontSize) || 64;
+        const min = 24;
+        let guard = 30;
+        while (el.scrollWidth > el.clientWidth && size > min && guard-- > 0) {
+          size -= 2;
+          el.style.fontSize = size + "px";
+        }
+      }
+
+      function stripSponsorTag(tag) {
+        if (!tag) return "";
+        const trimmed = String(tag).trim();
+        if (!trimmed) return "";
+        const pipeIndex = trimmed.indexOf("|");
+        if (pipeIndex === -1) return trimmed;
+        return trimmed.slice(pipeIndex + 1).trim();
+      }
+
+      async function load() {
+        try {
+          const r = await fetch(`/state.json?ts=${Date.now()}`, { cache: "no-store" });
+          if (!r.ok) throw new Error(r.statusText);
+          const raw = await r.json();
+          const idx = setupIndexFromQuery();
+          const s = raw?.setups ? (raw.setups[idx] ?? raw.setups[0]) : raw;
+
+          const p1Tag = stripSponsorTag(s?.p1?.tag);
+          const p2Tag = stripSponsorTag(s?.p2?.tag);
+          $("p1name").textContent = p1Tag || "Player One";
+          $("p2name").textContent = p2Tag || "Player Two";
+
+          const roundText = s?.meta?.round || "Up Next";
+          const bestOf = s?.meta?.bestOf ?? s?.meta?.best_of;
+          const subtitle = bestOf ? `${roundText} • Bo${bestOf}` : roundText;
+          $("round").textContent = subtitle;
+
+          const p1src = portraitPath(s?.p1?.character, s?.p1?.characterColor);
+          const p2src = portraitPath(s?.p2?.character, s?.p2?.characterColor);
+
+          setImg($("p1img"), p1src, "P1");
+          setImg($("p2img"), p2src, "P2");
+
+          fitTag($("p1name"));
+          fitTag($("p2name"));
+        } catch (e) {
+          console.warn("[upcoming overlay] state load error:", e);
+        }
+      }
+
+      load();
+      setInterval(load, 400);
+      window.addEventListener("resize", () => {
+        fitTag($("p1name"));
+        fitTag($("p2name"));
+      });
+    </script>
+  </body>
+</html>

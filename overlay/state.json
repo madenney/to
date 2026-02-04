@@ -1,0 +1,136 @@
+{
+  "setups": [
+    {
+      "p1": {
+        "side": "left",
+        "port": 1,
+        "tag": "Westdorf",
+        "sponsor": null,
+        "handle": null,
+        "character": "Ganondorf",
+        "characterColor": "Default",
+        "score": 2,
+        "countryCode": null
+      },
+      "p2": {
+        "side": "right",
+        "port": 2,
+        "tag": "GanonJay",
+        "sponsor": null,
+        "handle": null,
+        "character": "Ganondorf",
+        "characterColor": "Default",
+        "score": 1,
+        "countryCode": null
+      },
+      "meta": {
+        "tournament": "Melee Local",
+        "round": "Grand Finals",
+        "bestOf": 5,
+        "gameNumber": 0,
+        "stage": null,
+        "notes": null
+      },
+      "commentators": []
+    },
+    {
+      "p1": {
+        "side": "left",
+        "port": 1,
+        "tag": "Cooling ",
+        "sponsor": null,
+        "handle": null,
+        "character": "Samus",
+        "characterColor": "Default",
+        "score": 0,
+        "countryCode": null
+      },
+      "p2": {
+        "side": "right",
+        "port": 2,
+        "tag": "Shaman Anarchist",
+        "sponsor": null,
+        "handle": null,
+        "character": "Samus",
+        "characterColor": "Default",
+        "score": 0,
+        "countryCode": null
+      },
+      "meta": {
+        "tournament": "Melee Local",
+        "round": "Winners Quarters",
+        "bestOf": 5,
+        "gameNumber": 2,
+        "stage": null,
+        "notes": null
+      },
+      "commentators": []
+    },
+    {
+      "p1": {
+        "side": "left",
+        "port": 1,
+        "tag": "ssbMekk",
+        "sponsor": null,
+        "handle": null,
+        "character": "Ganondorf",
+        "characterColor": "Blue",
+        "score": 0,
+        "countryCode": null
+      },
+      "p2": {
+        "side": "right",
+        "port": 2,
+        "tag": "EthanzTalent",
+        "sponsor": null,
+        "handle": null,
+        "character": "Luigi",
+        "characterColor": "Pink",
+        "score": 0,
+        "countryCode": null
+      },
+      "meta": {
+        "tournament": "Melee Local",
+        "round": "Winner Round 1",
+        "bestOf": 3,
+        "gameNumber": 3,
+        "stage": null,
+        "notes": null
+      },
+      "commentators": []
+    },
+    {
+      "p1": {
+        "side": "left",
+        "port": 1,
+        "tag": "－－（＝＝＝＝＝＝＝＝＝＝＝＞",
+        "sponsor": null,
+        "handle": null,
+        "character": "Marth",
+        "characterColor": "Red",
+        "score": 1,
+        "countryCode": null
+      },
+      "p2": {
+        "side": "right",
+        "port": 2,
+        "tag": "ferocitii",
+        "sponsor": null,
+        "handle": null,
+        "character": "Peach",
+        "characterColor": "White",
+        "score": 2,
+        "countryCode": null
+      },
+      "meta": {
+        "tournament": "Melee Local",
+        "round": "Winners Round 2",
+        "bestOf": 3,
+        "gameNumber": 4,
+        "stage": null,
+        "notes": null
+      },
+      "commentators": []
+    }
+  ]
+}

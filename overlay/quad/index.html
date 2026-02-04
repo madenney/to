@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Quad Overlay</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="grid">
+      <div class="frame"><div class="wrapper"><iframe src="http://127.0.0.1:17890/?setup=1" allowtransparency="true"></iframe></div></div>
+      <div class="frame"><div class="wrapper"><iframe src="http://127.0.0.1:17890/?setup=2" allowtransparency="true"></iframe></div></div>
+      <div class="frame"><div class="wrapper"><iframe src="http://127.0.0.1:17890/?setup=3" allowtransparency="true"></iframe></div></div>
+      <div class="frame"><div class="wrapper"><iframe src="http://127.0.0.1:17890/?setup=4" allowtransparency="true"></iframe></div></div>
+    </div>
+    <script>
+      function resizeFrames() {
+        document.querySelectorAll(".frame .wrapper").forEach((wrap) => {
+          const parent = wrap.parentElement;
+          if (!parent) return;
+          const { width, height } = parent.getBoundingClientRect();
+          const scale = Math.min(width / 1920, height / 1080);
+          wrap.style.setProperty("--scale", scale.toString());
+        });
+      }
+
+      window.addEventListener("resize", resizeFrames);
+      window.addEventListener("load", resizeFrames);
+      resizeFrames();
+    </script>
+  </body>
+</html>

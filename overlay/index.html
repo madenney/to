@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Melee Overlay</title>
+
+    <link rel="stylesheet" href="/style.css" data-base="/style.css" />
+  </head>
+  <body>
+    <!-- ROUND (top center, slightly lower, 20% larger) -->
+    <div class="round-pill" id="round">WINNERS FINALS</div>
+
+    <!-- LEFT PLAYER BOX (top, left half) -->
+    <section class="player-box left">
+      <div class="pips" id="p1pips" aria-hidden="true"></div>
+      <!-- portrait sits between name and pips (inboard of pips) -->
+      <img class="char-img" id="p1img" alt="" aria-hidden="true" />
+      <div class="name" id="p1name">PLAYER ONE</div>
+    </section>
+
+    <!-- RIGHT PLAYER BOX (top, right half) -->
+    <section class="player-box right">
+      <div class="pips" id="p2pips" aria-hidden="true"></div>
+      <!-- portrait sits between name and pips (inboard of pips) -->
+      <img class="char-img" id="p2img" alt="" aria-hidden="true" />
+      <div class="name" id="p2name">PLAYER TWO</div>
+    </section>
+
+    <!-- optional dev-only live CSS reload (use ?dev=1) -->
+    <script src="/live-reload.js" defer></script>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function buildPips(score, bestOf) {
+        const need = Math.ceil(Number(bestOf || 5) / 2); // 2 for Bo3, 3 for Bo5
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < need; i++) {
+          const pip = document.createElement("span");
+          pip.className = "pip" + (i < Number(score || 0) ? " filled" : "");
+          frag.appendChild(pip);
+        }
+        const gap = need === 2 ? "14px" : "8px";
+        document.documentElement.style.setProperty("--pip-gap", gap);
+        return frag;
+      }
+
+      // Normalize character folder names just in case legacy values slip in.
+      function normalizeCharacterName(name) {
+        if (!name) return name;
+        // Fix the common typo specifically:
+        if (name === "Shiek") return "Sheik";
+        return name;
+      }
+
+      // portraits path: /resources/characters/portraits/<Character>/<Color>.png
+      function portraitPath(character, color) {
+        if (!character || !color) return "";
+        const clean = normalizeCharacterName(character);
+        const encChar = encodeURIComponent(clean);
+        const encColor = encodeURIComponent(color + ".png");
+        return `/resources/characters/portraits/${encChar}/${encColor}`;
+      }
+
+      function setImg(imgEl, src, label) {
+        if (!imgEl || !src) {
+          if (imgEl) { imgEl.removeAttribute("src"); imgEl.style.display = "none"; }
+          return;
+        }
+        imgEl.style.display = "";
+        imgEl.src = src;
+        imgEl.onerror = () => {
+          console.warn(`[overlay] ${label} portrait failed to load:`, src);
+          imgEl.style.display = "none";
+        };
+        imgEl.onload = () => { imgEl.style.display = ""; };
+      }
+
+      function setupIndexFromQuery() {
+        const params = new URLSearchParams(window.location.search);
+        const val = Number(params.get("setup"));
+        if (Number.isFinite(val) && val >= 1 && val <= 16) return val - 1;
+        return 0;
+      }
+
+      function fitTag(el) {
+        if (!el) return;
+        el.style.fontSize = "";
+        const min = 18;
+        let size = parseFloat(getComputedStyle(el).fontSize) || 36;
+        let guard = 30;
+        while (el.scrollWidth > el.clientWidth && size > min && guard-- > 0) {
+          size -= 1;
+          el.style.fontSize = size + "px";
+        }
+      }
+
+      function stripSponsorTag(tag) {
+        if (!tag) return "";
+        const trimmed = String(tag).trim();
+        if (!trimmed) return "";
+        const pipeIndex = trimmed.indexOf("|");
+        if (pipeIndex === -1) return trimmed;
+        return trimmed.slice(pipeIndex + 1).trim();
+      }
+
+      async function load() {
+        try {
+          const r = await fetch(`/state.json?ts=${Date.now()}`, { cache: "no-store" });
+          if (!r.ok) throw new Error(r.statusText);
+          const raw = await r.json();
+          const idx = setupIndexFromQuery();
+          const s = raw?.setups ? (raw.setups[idx] ?? raw.setups[0]) : raw;
+
+          $("round").textContent = s?.meta?.round ?? "";
+
+          const p1Tag = stripSponsorTag(s?.p1?.tag);
+          const p2Tag = stripSponsorTag(s?.p2?.tag);
+          $("p1name").textContent = p1Tag ?? "";
+          $("p2name").textContent = p2Tag ?? "";
+          fitTag($("p1name"));
+          fitTag($("p2name"));
+
+          const bo = s?.meta?.bestOf ?? s?.meta?.best_of ?? 5;
+          const p1 = Number(s?.p1?.score ?? 0);
+          const p2 = Number(s?.p2?.score ?? 0);
+
+          $("p1pips").innerHTML = "";
+          $("p1pips").appendChild(buildPips(p1, bo));
+          $("p2pips").innerHTML = "";
+          $("p2pips").appendChild(buildPips(p2, bo));
+
+          // STRICT: require characterColor
+          const p1src = portraitPath(s?.p1?.character, s?.p1?.characterColor);
+          const p2src = portraitPath(s?.p2?.character, s?.p2?.characterColor);
+
+          setImg($("p1img"), p1src, "P1");
+          setImg($("p2img"), p2src, "P2");
+        } catch (e) {
+          console.warn("[overlay] state load error:", e);
+        }
+      }
+
+      load();
+      setInterval(load, 250);
+      window.addEventListener("resize", () => {
+        fitTag($("p1name"));
+        fitTag($("p2name"));
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,184 @@
+/* ===== minimalist: transparent canvas, tag boxes at top, round centered ===== */
+
+:root {
+  --fg: hsl(0, 0%, 100%);
+  --line: #ffffff;
+  --box-bg: #000;
+
+  --safe: 24px;
+
+  /* round sizing/positioning */
+  --round-top: 32px;
+  --round-size: 25px;
+
+  /* player boxes at top */
+  --boxes-top: 40px;
+  --box-w: 580px;
+  --box-h: 96px;
+  --name-size: 36px;
+
+  /* pips */
+  --pip-size: 14px;
+  --pip-gap: 8px;
+  --pip-border: 2px;
+  --box-pad-x: 20px;
+
+  /* reserve a slot next to the inner edge for pips + breathing room */
+  --pip-slot: calc(var(--pip-size) + (2 * var(--pip-border)) + var(--pip-gap));
+  --img-inset: calc(var(--box-pad-x) + var(--pip-slot) + 6px);
+
+  /* portrait sizing */
+  --img-max-w: 46%;              /* soft cap so it doesn't collide with the name area */
+  --img-reserve-w: var(--img-max-w);  /* fallback reserve if actual width not known */
+  --img-y: 0px;                  /* vertical nudge (+ moves down, - up) */
+  --img-x: 0px;                  /* horizontal nudge (+ toward name, - toward pips) */
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* ------ Round text ------ */
+.round-pill {
+  position: absolute;
+  top: var(--round-top);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  background: var(--box-bg);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  font-size: var(--round-size);
+}
+
+/* ------ Player boxes ------ */
+.player-box {
+  position: absolute;
+  top: var(--boxes-top);
+  width: var(--box-w);
+  height: var(--box-h);
+  box-sizing: border-box;
+
+  border: 4px solid var(--line);
+  border-radius: 6px;
+  background: var(--box-bg);
+
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  justify-items: center;
+
+  isolation: isolate;
+  overflow: hidden; /* allow portrait to extend but clip it */
+
+  /* these will be set per-box by JS; default to 0 so names center across the full half if missing */
+  --img-actual-w: 0px;
+}
+
+.player-box.left  { left: calc(23% - var(--box-w) / 2); }
+.player-box.right { left: calc(78% - var(--box-w) / 2); }
+
+/* Player name (centered between portrait and outer edge using actual portrait width) */
+.player-box .name {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--name-size);
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  z-index: 3;
+  padding: 0 8px;
+  width: 416px;
+}
+
+/* LEFT: outer-left padding → (inner reserved area + actual image width) */
+.player-box.left .name {
+  left: var(--box-pad-x);
+  right: calc(var(--img-inset) + var(--img-actual-w, var(--img-reserve-w)));
+}
+
+/* RIGHT: (inner reserved area + actual image width) → outer-right padding */
+.player-box.right .name {
+  left: 102px;
+  right: var(--box-pad-x);
+}
+
+/* Pips */
+.player-box .pips {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pip-gap);
+  z-index: 4;
+}
+.player-box.left  .pips { right: var(--box-pad-x); }
+.player-box.right .pips { left:  var(--box-pad-x); }
+
+.pip {
+  width: var(--pip-size);
+  height: var(--pip-size);
+  border: var(--pip-border) solid var(--line);
+  border-radius: 999px;
+  opacity: 0.5;
+}
+.pip.filled { background: var(--fg); opacity: 1; }
+
+/* ===== Character portrait ===== */
+.player-box .char-img {
+  position: absolute;
+  padding-top: 3px;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  width: auto;
+  max-width: var(--img-max-w);
+
+  object-fit: contain;
+  object-position: center;
+
+  /* outer-side border only: we’ll remove inner border below */
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-top: none;
+  border-bottom: none;
+
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,.35));
+  opacity: 0.95;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Anchor inboard of pips */
+.player-box.left  .char-img { right: var(--img-inset); }
+.player-box.right .char-img { left:  var(--img-inset); }
+
+/* Inward-facing + XY nudges (optional) */
+/* Remove the inner border so only the outer edge shows a line */
+.player-box.left .char-img {
+  transform: translateX(var(--img-x)) translateY(var(--img-y));
+  border-left: none;   /* inner edge off */
+}
+
+.player-box.right .char-img {
+  transform: translateX(var(--img-x)) translateY(var(--img-y)) scaleX(-1);
+  border-left: none;   /* inner edge off (left is inner on right side) */
+}
+
+/* --- Optional dev guides ---
+.player-box { outline: 1px dashed rgba(255,255,255,.15); }
+.player-box .char-img { outline: 1px dashed rgba(0,255,0,.25); }
+*/

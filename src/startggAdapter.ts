@@ -67,6 +67,9 @@ type StartggRawSlot = {
       score?: { value?: number | null; label?: string | null };
     };
   };
+  sourceType?: string | null;
+  sourceSetId?: number | string | null;
+  sourceLabel?: string | null;
 };
 
 function normalizeNumber(value: unknown): number | null {
@@ -152,11 +155,11 @@ function mapSetState(value: unknown): string {
     case 1:
       return "pending";
     case 2:
-      return "pending";
-    case 3:
       return "inProgress";
-    case 4:
+    case 3:
       return "completed";
+    case 4:
+      return "skipped";
     case 6:
       return "skipped";
     default:
@@ -225,6 +228,9 @@ export function normalizeStartggResponse(raw: StartggRawResponse): StartggSimSta
         (entrantId !== null ? entrantsById.get(entrantId) : undefined) ?? null;
       const score = normalizeNumber(slot.standing?.stats?.score?.value);
       const label = slot.standing?.stats?.score?.label ?? null;
+      const sourceSetId = normalizeNumber(slot.sourceSetId);
+      const sourceType = slot.sourceType ?? null;
+      const sourceLabel = slot.sourceLabel ?? null;
       let result: string | null = null;
       if (label && label.toLowerCase().includes("dq")) {
         result = "dq";
@@ -240,6 +246,9 @@ export function normalizeStartggResponse(raw: StartggRawResponse): StartggSimSta
         seed: entrant?.seed ?? null,
         score: score ?? null,
         result,
+        sourceType,
+        sourceSetId,
+        sourceLabel,
       };
     });
     return {
