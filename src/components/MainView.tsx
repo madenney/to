@@ -252,7 +252,7 @@ export default function MainView({
                   }}
                   aria-label={`Open details for ${s.name}`}
                 >
-                  <div className="setup-main">
+                  <div className={`setup-main ${assigned?.isPlaying && !isOffline && !isNonTourney ? "playing" : isMatchActive ? "match-active" : ""}`}>
                     <div className="setup-header">
                       <div className="setup-name">
                         {s.name}
@@ -314,7 +314,7 @@ export default function MainView({
       <section className="panel">
         <div className="section-header">
           <div>
-            <p className="eyebrow">Detection</p>
+            <p className="eyebrow">Broadcasting</p>
           </div>
           <div className="action-row">
             <button
@@ -329,9 +329,9 @@ export default function MainView({
             </button>
           </div>
         </div>
-        <div className="streams-grid">
+        <div className="broadcast-grid">
           {streams.length === 0 ? (
-            <div className="muted tiny">No broadcasts detected.</div>
+            <div className="broadcast-empty">No active broadcasts found.</div>
           ) : (
             streams.map((s) => {
               const isPlaying = s.isPlaying === true;
@@ -340,54 +340,47 @@ export default function MainView({
                 linkedEntrantId && Number.isFinite(linkedEntrantId)
                   ? entrantLookup.get(linkedEntrantId)
                   : null;
+              const assignedSetupId = getStreamSetupId(s.id);
               return (
                 <article
                   key={s.id}
-                  className={`stream-card ${draggedStreamId === s.id ? "dragging" : ""}`}
+                  className={`broadcast-card ${isPlaying ? "playing" : ""} ${draggedStreamId === s.id ? "dragging" : ""}`}
                   draggable
                   onDragStart={(event) => handleStreamDragStart(event, s)}
                   onDragEnd={handleStreamDragEnd}
                 >
-                  <div className="stream-row">
-                    <div className="stream-pair">
-                      <div>
-                        <div className="value">{stripSponsorTag(s.p1Tag) || "Unknown"}</div>
-                        <div className="muted code">{s.p1Code ?? "N/A"}</div>
-                        {linkedEntrant && (
-                          <div className="stream-link">
-                            <span className="muted tiny">
-                              Linked: {stripSponsorTag(linkedEntrant.name)}
-                            </span>
-                            <button
-                              className="ghost-btn tiny"
-                              onClick={() => unlinkStream(s.id)}
-                              type="button"
-                            >
-                              Clear
-                            </button>
-                          </div>
-                        )}
-                        {isPlaying && (
-                          <div className="stream-status" data-state="playing">
-                            Playing
-                          </div>
-                        )}
-                      </div>
+                  <div className="broadcast-card-header">
+                    <div className="broadcast-player-name">
+                      {stripSponsorTag(s.p1Tag) || "Unknown"}
                     </div>
-                    <div className="stream-actions">
-                      <select
-                        className="ghost-select"
-                        value={getStreamSetupId(s.id) ?? ""}
-                        onChange={(e) => handleSetupSelect(s, e.target.value)}
+                    {isPlaying && <span className="broadcast-live-badge">Live</span>}
+                  </div>
+                  <div className="broadcast-card-code">{s.p1Code ?? "N/A"}</div>
+                  {linkedEntrant && (
+                    <div className="broadcast-linked">
+                      <span>→ {stripSponsorTag(linkedEntrant.name)}</span>
+                      <button
+                        className="broadcast-unlink"
+                        onClick={() => unlinkStream(s.id)}
+                        type="button"
                       >
-                        <option value="">Choose setup…</option>
-                        {setups.map((setup) => (
-                          <option key={setup.id} value={setup.id}>
-                            {setup.name}
-                          </option>
-                        ))}
-                      </select>
+                        ×
+                      </button>
                     </div>
+                  )}
+                  <div className="broadcast-card-footer">
+                    <select
+                      className="broadcast-setup-select"
+                      value={assignedSetupId ?? ""}
+                      onChange={(e) => handleSetupSelect(s, e.target.value)}
+                    >
+                      <option value="">Assign to setup…</option>
+                      {setups.map((setup) => (
+                        <option key={setup.id} value={setup.id}>
+                          {setup.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </article>
               );

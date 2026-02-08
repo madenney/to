@@ -78,6 +78,7 @@ export type UseBracketReturn = {
   broadcastEntrants: StartggSimState["entrants"];
   broadcastActiveCount: number;
   replaySet: Set<number>;
+  isRefreshing: boolean;
   setBracketStatus: (status: string) => void;
   applyNormalizedState: (next: StartggSimState) => void;
   refreshBracketState: () => Promise<void>;
@@ -172,6 +173,7 @@ export function useBracket(deps: UseBracketDeps): UseBracketReturn {
   const [replayStreamUpdate, setReplayStreamUpdate] = useState<ReplayStreamUpdate | null>(null);
   const [replayStreamStartedAt, setReplayStreamStartedAt] = useState<number | null>(null);
   const [broadcastSelections, setBroadcastSelections] = useState<Record<number, boolean>>({});
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // ── Refs ──────────────────────────────────────────────────────────────
 
@@ -275,16 +277,25 @@ export function useBracket(deps: UseBracketDeps): UseBracketReturn {
 
   async function refreshBracketState() {
     setBracketStatus("");
+    setIsRefreshing(true);
     try {
+      console.time("refreshBracketState:invoke");
       const res = await invoke("startgg_sim_raw_state");
+      console.timeEnd("refreshBracketState:invoke");
+      console.time("refreshBracketState:normalize");
       const normalized = normalizeStartggResponse(res);
+      console.timeEnd("refreshBracketState:normalize");
       if (normalized) {
+        console.time("refreshBracketState:setState");
         applyNormalizedState(normalized);
+        console.timeEnd("refreshBracketState:setState");
       }
     } catch (e) {
       const msg =
         e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
       setBracketStatus(`Bracket update failed: ${msg}`);
+    } finally {
+      setIsRefreshing(false);
     }
   }
 
@@ -1159,6 +1170,7 @@ export function useBracket(deps: UseBracketDeps): UseBracketReturn {
     broadcastEntrants,
     broadcastActiveCount,
     replaySet,
+    isRefreshing,
     setBracketStatus,
     applyNormalizedState,
     refreshBracketState,

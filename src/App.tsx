@@ -203,10 +203,7 @@ export default function App() {
           broadcastEntrants={bracketHook.broadcastEntrants}
           broadcastSelections={bracketHook.broadcastSelections}
           broadcastActiveCount={bracketHook.broadcastActiveCount}
-          attendeeList={attendeesHook.attendeeList}
-          attendeeStatusMap={attendeesHook.attendeeStatusMap}
-          attendeePlayingMap={attendeesHook.attendeePlayingMap}
-          attendeeBroadcastMap={attendeesHook.attendeeBroadcastMap}
+          isRefreshing={bracketHook.isRefreshing}
           bracketScrollRef={bracketHook.bracketScrollRef}
           resolveSlotLabel={resolveSlotLabel}
           openBracketSettings={bracketHook.openBracketSettings}
@@ -216,6 +213,7 @@ export default function App() {
           cancelReplayStream={bracketHook.cancelReplayStream}
           streamBracketReplay={bracketHook.streamBracketReplay}
           toggleBroadcast={bracketHook.toggleBroadcast}
+          refreshBracketState={bracketHook.refreshBracketState}
           handleBracketDragEnter={bracketHook.handleBracketDragEnter}
           handleBracketDragLeave={bracketHook.handleBracketDragLeave}
           handleSetDragOver={bracketHook.handleSetDragOver}
@@ -276,6 +274,7 @@ export default function App() {
         <BracketSettingsModal
           config={configHook.config}
           bracketZoom={bracketHook.bracketZoom}
+          isRefreshing={bracketHook.isRefreshing}
           setBracketZoom={bracketHook.setBracketZoom}
           setAutoCompleteBracket={configHook.setAutoCompleteBracket}
           resetBracketState={bracketHook.resetBracketState}

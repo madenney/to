@@ -314,7 +314,7 @@ export function useConfig(
     };
     refreshLive();
     if (config.startggPolling) {
-      timer = window.setInterval(refreshLive, 3000);
+      timer = window.setInterval(refreshLive, 5000);
     }
     return () => {
       cancelled = true;

@@ -30,16 +30,15 @@ type StartggRawEntrant = {
   id?: string | number;
   name?: string | null;
   seeds?: Array<{ seedNum?: number | null }>;
-  seed?: number | null;
-  slippiCode?: string | null;
-  customFields?: Array<{ name?: string | null; value?: string | null }>;
+  initialSeedNum?: number | null;
   participants?: StartggRawParticipant[];
 };
 
 type StartggRawParticipant = {
   id?: string | number;
   gamerTag?: string | null;
-  player?: { gamerTag?: string | null; slippiCode?: string | null };
+  connectedAccounts?: unknown;
+  player?: { gamerTag?: string | null };
   user?: {
     id?: string | number;
     slug?: string | null;
@@ -107,23 +106,52 @@ function pickPhases(raw?: StartggRawEvent): StartggSimState["phases"] {
   }));
 }
 
-function extractSlippiCode(entrant: StartggRawEntrant): string | null {
-  if (entrant.slippiCode) {
-    return entrant.slippiCode;
+function looksLikeSlippiCode(s: string): boolean {
+  const trimmed = s.trim();
+  return trimmed.includes("#") && trimmed.length >= 3 && trimmed.length <= 10;
+}
+
+function extractSlippiFromConnectedAccounts(accounts: unknown): string | null {
+  if (accounts == null) return null;
+  if (typeof accounts === "string") {
+    return looksLikeSlippiCode(accounts) ? accounts.trim() : null;
   }
-  for (const field of entrant.customFields ?? []) {
-    const name = field.name?.toLowerCase() ?? "";
-    if (name.includes("slippi") || name.includes("connect")) {
-      if (field.value) {
-        return field.value;
+  if (Array.isArray(accounts)) {
+    for (const item of accounts) {
+      const result = extractSlippiFromConnectedAccounts(item);
+      if (result) return result;
+    }
+    return null;
+  }
+  if (typeof accounts === "object") {
+    const obj = accounts as Record<string, unknown>;
+    // Check keys for slippi-related entries first
+    for (const [key, value] of Object.entries(obj)) {
+      const keyLower = key.toLowerCase();
+      if (keyLower.includes("slippi") || keyLower.includes("connect")) {
+        if (typeof value === "string" && value.trim()) return value.trim();
+        const nested = extractSlippiFromConnectedAccounts(value);
+        if (nested) return nested;
       }
     }
-  }
-  for (const participant of entrant.participants ?? []) {
-    const playerCode = participant.player?.slippiCode;
-    if (playerCode) {
-      return playerCode;
+    // Then check all values for connect code pattern
+    for (const value of Object.values(obj)) {
+      if (typeof value === "string" && looksLikeSlippiCode(value)) {
+        return value.trim();
+      }
+      const nested = extractSlippiFromConnectedAccounts(value);
+      if (nested) return nested;
     }
+  }
+  return null;
+}
+
+function extractSlippiCode(entrant: StartggRawEntrant): string | null {
+  for (const participant of entrant.participants ?? []) {
+    // Check connectedAccounts JSON (custom registration fields)
+    const fromAccounts = extractSlippiFromConnectedAccounts(participant.connectedAccounts);
+    if (fromAccounts) return fromAccounts;
+    // Check user authorizations (linked accounts on start.gg profile)
     for (const auth of participant.user?.authorizations ?? []) {
       const authType = auth.type?.toLowerCase() ?? "";
       if (authType.includes("slippi") || authType.includes("connect")) {
@@ -132,6 +160,7 @@ function extractSlippiCode(entrant: StartggRawEntrant): string | null {
         }
       }
     }
+    // Fallback: check if gamerTag looks like a connect code
     const tags = [participant.gamerTag, participant.player?.gamerTag];
     for (const tag of tags) {
       if (tag && tag.includes("#")) {
@@ -202,7 +231,7 @@ export function normalizeStartggResponse(raw: StartggRawResponse): StartggSimSta
       `Entrant ${id}`;
     const seed =
       entrant.seeds?.[0]?.seedNum ??
-      entrant.seed ??
+      entrant.initialSeedNum ??
       index + 1;
     const slippiCode = extractSlippiCode(entrant) ?? `TEST#${id}`;
     return {
@@ -242,7 +271,7 @@ export function normalizeStartggResponse(raw: StartggRawResponse): StartggSimSta
       return {
         entrantId: entrant?.id ?? entrantId,
         entrantName: entrant?.name ?? slot.entrant?.name ?? null,
-        slippiCode: entrant?.slippiCode ?? extractSlippiCode(slot.entrant ?? {}),
+        slippiCode: entrant?.slippiCode ?? extractSlippiCode(slot.entrant ?? {} as StartggRawEntrant),
         seed: entrant?.seed ?? null,
         score: score ?? null,
         result,

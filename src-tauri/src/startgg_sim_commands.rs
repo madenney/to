@@ -1,10 +1,10 @@
 use crate::config::*;
-use crate::types::*;
-use crate::startgg::{init_startgg_sim, load_startgg_sim_config, load_startgg_sim_config_from};
+use crate::types::{SharedTestState, TestModeState, BracketPersistenceStatus};
+use crate::startgg::{init_startgg_sim, load_startgg_sim_config_from};
 use crate::replay::{replay_winner_identity, set_slot_index_for_identity, tag_from_code, next_reference_step_scores};
 use crate::startgg_sim::{StartggSim, StartggSimState};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::State;
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -20,6 +20,22 @@ where
     let sim = guard.startgg_sim.as_mut()
         .ok_or_else(|| "Start.gg sim failed to initialize.".to_string())?;
     f(sim, now)
+}
+
+/// Lock the mutex, initialize the sim if needed, call `f`, then save state if successful.
+fn with_sim_save<F, R>(test_state: &State<'_, SharedTestState>, f: F) -> Result<R, String>
+where
+    F: FnOnce(&mut StartggSim, u64) -> Result<R, String>,
+{
+    let now = now_ms();
+    let mut guard = test_state.lock().map_err(|e| e.to_string())?;
+    init_startgg_sim(&mut guard, now)?;
+    let config_path = guard.startgg_config_path.clone();
+    let sim = guard.startgg_sim.as_mut()
+        .ok_or_else(|| "Start.gg sim failed to initialize.".to_string())?;
+    let result = f(sim, now)?;
+    save_sim_state(sim, config_path.as_deref());
+    Ok(result)
 }
 
 /// Lock the mutex, then call `f` with `(&mut TestModeState, now_ms)` — for reset
@@ -38,6 +54,16 @@ fn check_test_mode() -> Result<(), String> {
         return Err("Test mode is disabled in settings.".to_string());
     }
     Ok(())
+}
+
+/// Save state to persistence file, using default config path if none set
+fn save_sim_state(sim: &StartggSim, config_path: Option<&Path>) {
+    let effective_path = config_path
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(startgg_sim_config_path);
+    if let Err(e) = sim.save_state(&effective_path) {
+        tracing::warn!("Failed to save bracket state: {}", e);
+    }
 }
 
 // ── Commands ────────────────────────────────────────────────────────────
@@ -61,14 +87,20 @@ pub fn startgg_sim_reset(
         let resolved_path = config_path
             .as_deref()
             .map(resolve_startgg_sim_config_path);
-        let config = if let Some(path) = resolved_path.clone().or_else(|| guard.startgg_config_path.clone()) {
-            load_startgg_sim_config_from(&path)?
-        } else {
-            load_startgg_sim_config()?
-        };
+        let effective_path = resolved_path.clone()
+            .or_else(|| guard.startgg_config_path.clone())
+            .unwrap_or_else(startgg_sim_config_path);
+        let config = load_startgg_sim_config_from(&effective_path)?;
+        // Delete persisted state file on reset
+        if let Err(e) = StartggSim::delete_state_file(&effective_path) {
+            tracing::warn!("Failed to delete bracket state file: {}", e);
+        }
         if resolved_path.is_some() {
             guard.startgg_config_path = resolved_path;
         }
+        // Clear persistence flags on reset
+        guard.state_restored_from_persistence = false;
+        guard.state_config_matched = true;
         guard.startgg_sim = Some(StartggSim::new(config, now)?);
         let sim = guard.startgg_sim.as_mut()
             .ok_or_else(|| "Start.gg sim failed to initialize.".to_string())?;
@@ -79,7 +111,7 @@ pub fn startgg_sim_reset(
 #[tauri::command]
 pub fn startgg_sim_advance_set(set_id: u64, test_state: State<'_, SharedTestState>) -> Result<StartggSimState, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.advance_set(set_id, now)?;
         Ok(sim.state(now))
     })
@@ -92,7 +124,7 @@ pub fn startgg_sim_force_winner(
     test_state: State<'_, SharedTestState>,
 ) -> Result<StartggSimState, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.force_winner(set_id, winner_slot as usize, now)?;
         Ok(sim.state(now))
     })
@@ -105,7 +137,7 @@ pub fn startgg_sim_mark_dq(
     test_state: State<'_, SharedTestState>,
 ) -> Result<StartggSimState, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.mark_dq(set_id, dq_slot as usize, now)?;
         Ok(sim.state(now))
     })
@@ -130,14 +162,20 @@ pub fn startgg_sim_raw_reset(
         let resolved_path = config_path
             .as_deref()
             .map(resolve_startgg_sim_config_path);
-        let config = if let Some(path) = resolved_path.clone().or_else(|| guard.startgg_config_path.clone()) {
-            load_startgg_sim_config_from(&path)?
-        } else {
-            load_startgg_sim_config()?
-        };
+        let effective_path = resolved_path.clone()
+            .or_else(|| guard.startgg_config_path.clone())
+            .unwrap_or_else(startgg_sim_config_path);
+        let config = load_startgg_sim_config_from(&effective_path)?;
+        // Delete persisted state file on reset
+        if let Err(e) = StartggSim::delete_state_file(&effective_path) {
+            tracing::warn!("Failed to delete bracket state file: {}", e);
+        }
         if resolved_path.is_some() {
             guard.startgg_config_path = resolved_path;
         }
+        // Clear persistence flags on reset
+        guard.state_restored_from_persistence = false;
+        guard.state_config_matched = true;
         guard.startgg_sim = Some(StartggSim::new(config, now)?);
         let sim = guard.startgg_sim.as_mut()
             .ok_or_else(|| "Start.gg sim failed to initialize.".to_string())?;
@@ -163,7 +201,7 @@ pub fn startgg_sim_raw_start_set(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.start_set_manual(set_id, now)?;
         Ok(sim.raw_response(now, None))
     })
@@ -179,7 +217,7 @@ pub fn startgg_sim_raw_update_scores(
     if scores.len() != 2 {
         return Err("Scores must include exactly two values.".to_string());
     }
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.update_set_scores_manual(set_id, [scores[0], scores[1]], now)?;
         Ok(sim.raw_response(now, None))
     })
@@ -207,7 +245,7 @@ pub fn startgg_sim_raw_apply_replay_result(
     let (winner_code, winner_tag) = replay_winner_identity(&resolved)?;
     let winner_tag = winner_tag.or_else(|| winner_code.as_deref().map(tag_from_code));
 
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         let state_snapshot = sim.state(now);
         let set = state_snapshot
             .sets
@@ -244,7 +282,7 @@ pub fn startgg_sim_raw_step_set(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         let outcome = sim
             .reference_outcome_for_set(set_id)
             .ok_or_else(|| "No reference outcome found for this set.".to_string())?;
@@ -290,7 +328,7 @@ pub fn startgg_sim_raw_finalize_reference_set(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         let outcome = sim
             .reference_outcome_for_set(set_id)
             .ok_or_else(|| "No reference outcome found for this set.".to_string())?;
@@ -314,7 +352,7 @@ pub fn startgg_sim_raw_finish_set(
     if scores.len() != 2 {
         return Err("Scores must include exactly two values.".to_string());
     }
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.finish_set_manual(set_id, winner_slot as usize, [scores[0], scores[1]], now)?;
         Ok(sim.raw_response(now, None))
     })
@@ -325,7 +363,7 @@ pub fn startgg_sim_raw_complete_bracket(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         if sim.has_reference_sets() {
             sim.complete_from_reference(now)?;
         } else {
@@ -342,7 +380,7 @@ pub fn startgg_sim_raw_force_winner(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.force_winner(set_id, winner_slot as usize, now)?;
         Ok(sim.raw_response(now, None))
     })
@@ -355,7 +393,7 @@ pub fn startgg_sim_raw_mark_dq(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.mark_dq(set_id, dq_slot as usize, now)?;
         Ok(sim.raw_response(now, None))
     })
@@ -367,8 +405,39 @@ pub fn startgg_sim_raw_reset_set(
     test_state: State<'_, SharedTestState>,
 ) -> Result<Value, String> {
     check_test_mode()?;
-    with_sim(&test_state, |sim, now| {
+    with_sim_save(&test_state, |sim, now| {
         sim.reset_set_and_dependents(set_id, now)?;
         Ok(sim.raw_response(now, None))
+    })
+}
+
+#[tauri::command]
+pub fn startgg_sim_clear_persisted_state(
+    test_state: State<'_, SharedTestState>,
+) -> Result<(), String> {
+    check_test_mode()?;
+    let guard = test_state.lock().map_err(|e| e.to_string())?;
+    let effective_path = guard.startgg_config_path
+        .clone()
+        .unwrap_or_else(startgg_sim_config_path);
+    StartggSim::delete_state_file(&effective_path)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn startgg_sim_persistence_status(
+    test_state: State<'_, SharedTestState>,
+) -> Result<BracketPersistenceStatus, String> {
+    check_test_mode()?;
+    let guard = test_state.lock().map_err(|e| e.to_string())?;
+    let effective_path = guard.startgg_config_path
+        .clone()
+        .unwrap_or_else(startgg_sim_config_path);
+    let state_file_path = StartggSim::persistence_path(&effective_path);
+    Ok(BracketPersistenceStatus {
+        state_restored: guard.state_restored_from_persistence,
+        config_matched: guard.state_config_matched,
+        state_file_path: Some(state_file_path.to_string_lossy().to_string()),
+        state_file_exists: state_file_path.exists(),
     })
 }

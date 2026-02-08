@@ -6,6 +6,8 @@ pub mod startgg;
 pub mod test_mode;
 pub mod slippi;
 pub mod startgg_sim_commands;
+pub mod entrants;
+pub mod entrant_commands;
 mod startgg_sim;
 
 use types::*;
@@ -15,6 +17,7 @@ use config::normalize_slippi_code;
 use replay::{
     build_overlay_state, is_replay_file_path, replay_slots_from_file,
 };
+use entrants::EntrantManager;
 
 use serde_json::{json, Value};
 use std::{
@@ -33,7 +36,7 @@ use axum::{
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use tauri::{path::BaseDirectory, Manager, State};
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 // ── Setup CRUD commands ────────────────────────────────────────────────
@@ -498,7 +501,8 @@ pub fn run() {
     let test_state: SharedTestState = Arc::new(Mutex::new(TestModeState::default()));
     let live_startgg: SharedLiveStartgg = Arc::new(Mutex::new(LiveStartggState::default()));
     let replay_cache: SharedOverlayCache = Arc::new(Mutex::new(OverlayReplayCache::default()));
-    startgg::spawn_startgg_polling(live_startgg.clone());
+    let entrant_manager: SharedEntrantManager = Arc::new(Mutex::new(EntrantManager::new()));
+    startgg::spawn_startgg_polling(live_startgg.clone(), Some(entrant_manager.clone()));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -506,6 +510,7 @@ pub fn run() {
         .manage(test_state.clone())
         .manage(live_startgg.clone())
         .manage(replay_cache.clone())
+        .manage(entrant_manager.clone())
         .setup(move |app| {
             let overlay_dirs = resolve_overlay_dirs(app);
             let OverlayDirs { root, resources, upcoming, dual, quad } = overlay_dirs;
@@ -599,10 +604,21 @@ pub fn run() {
             startgg_sim_commands::startgg_sim_raw_force_winner,
             startgg_sim_commands::startgg_sim_raw_mark_dq,
             startgg_sim_commands::startgg_sim_raw_reset_set,
+            startgg_sim_commands::startgg_sim_clear_persisted_state,
+            startgg_sim_commands::startgg_sim_persistence_status,
             test_mode::set_broadcast_players,
             startgg_live_snapshot,
             load_config,
-            save_config
+            save_config,
+            entrant_commands::get_unified_entrants,
+            entrant_commands::set_entrant_slippi_code,
+            entrant_commands::assign_entrant_to_setup,
+            entrant_commands::unassign_entrant,
+            entrant_commands::toggle_auto_assignment,
+            entrant_commands::get_setups_sorted_by_seed,
+            entrant_commands::get_auto_assignment_status,
+            entrant_commands::run_auto_assignment,
+            entrant_commands::sync_entrants_from_startgg
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

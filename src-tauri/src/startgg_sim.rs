@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,6 +175,36 @@ pub struct StartggSimState {
   pub reference_tournament_link: Option<String>,
 }
 
+// ── Persistence types ───────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimPersistence {
+  pub config_path: String,
+  pub config_hash: Option<String>,
+  pub sets: Vec<SetPersistence>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPersistence {
+  pub set_id: u64,
+  pub state: String,
+  pub scores: [u8; 2],
+  pub results: [Option<String>; 2],
+  pub entrant_ids: [Option<u32>; 2],
+  pub winner_id: Option<u32>,
+  pub started_at_ms: Option<u64>,
+  pub completed_at_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LoadStateResult {
+  pub loaded: bool,
+  pub config_matched: bool,
+  pub sets_restored: usize,
+}
+
 #[derive(Clone, Debug)]
 struct SimEntrant {
   id: u32,
@@ -197,7 +229,7 @@ enum SimSetState {
   Skipped,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum SlotResult {
   Win,
   Loss,
@@ -1412,6 +1444,178 @@ impl StartggSim {
       reference_tournament_link: self.config.reference_tournament_link.clone(),
     }
   }
+
+  // ── Persistence methods ───────────────────────────────────────────────
+
+  pub fn persistence_path(config_path: &Path) -> PathBuf {
+    let mut p = config_path.to_path_buf();
+    let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+    p.set_file_name(format!("{}.state.json", name));
+    p
+  }
+
+  pub fn save_state(&self, config_path: &Path) -> Result<(), String> {
+    let persistence = self.to_persistence(config_path);
+    let path = Self::persistence_path(config_path);
+    let json = serde_json::to_string_pretty(&persistence).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| format!("write state: {}", e))?;
+    Ok(())
+  }
+
+  pub fn load_state(&mut self, config_path: &Path) -> Result<LoadStateResult, String> {
+    let path = Self::persistence_path(config_path);
+    if !path.exists() {
+      return Ok(LoadStateResult::default());
+    }
+    let data = fs::read_to_string(&path).map_err(|e| format!("read state: {}", e))?;
+    let persistence: SimPersistence = serde_json::from_str(&data).map_err(|e| format!("parse state: {}", e))?;
+
+    // Check if config has changed
+    let current_hash = Self::compute_config_hash(config_path);
+    let config_matched = match (&persistence.config_hash, &current_hash) {
+      (Some(saved), Some(current)) => saved == current,
+      (None, _) => true, // No saved hash means old state file, allow it
+      (Some(_), None) => false, // Had hash but can't read config now
+    };
+
+    if !config_matched {
+      tracing::warn!(
+        "Bracket config has changed since state was saved. Persisted state may be invalid."
+      );
+    }
+
+    let sets_restored = self.apply_persistence(&persistence)?;
+    Ok(LoadStateResult {
+      loaded: true,
+      config_matched,
+      sets_restored,
+    })
+  }
+
+  pub fn delete_state_file(config_path: &Path) -> Result<(), String> {
+    let path = Self::persistence_path(config_path);
+    if path.exists() {
+      fs::remove_file(&path).map_err(|e| format!("delete state: {}", e))?;
+    }
+    Ok(())
+  }
+
+  fn to_persistence(&self, config_path: &Path) -> SimPersistence {
+    let sets = self
+      .sets
+      .iter()
+      .filter(|set| set.state != SimSetState::Pending || set.slots.iter().any(|s| s.score.is_some()))
+      .map(|set| {
+        let state_str = match set.state {
+          SimSetState::Pending => "pending",
+          SimSetState::InProgress => "inProgress",
+          SimSetState::Completed => "completed",
+          SimSetState::Skipped => "skipped",
+        };
+        let scores = [
+          set.slots[0].score.unwrap_or(0),
+          set.slots[1].score.unwrap_or(0),
+        ];
+        let results = [
+          set.slots[0].result.map(|r| match r {
+            SlotResult::Win => "win".to_string(),
+            SlotResult::Loss => "loss".to_string(),
+            SlotResult::Dq => "dq".to_string(),
+          }),
+          set.slots[1].result.map(|r| match r {
+            SlotResult::Win => "win".to_string(),
+            SlotResult::Loss => "loss".to_string(),
+            SlotResult::Dq => "dq".to_string(),
+          }),
+        ];
+        SetPersistence {
+          set_id: set.id,
+          state: state_str.to_string(),
+          scores,
+          results,
+          entrant_ids: [set.slots[0].entrant_id, set.slots[1].entrant_id],
+          winner_id: set_winner_id(set),
+          started_at_ms: set.started_at_ms,
+          completed_at_ms: set.completed_at_ms,
+        }
+      })
+      .collect();
+
+    SimPersistence {
+      config_path: config_path.to_string_lossy().to_string(),
+      config_hash: Self::compute_config_hash(config_path),
+      sets,
+    }
+  }
+
+  fn compute_config_hash(config_path: &Path) -> Option<String> {
+    let data = fs::read_to_string(config_path).ok()?;
+    // Simple hash: use first 16 chars of hex-encoded hash of content
+    let mut hash: u64 = 0;
+    for byte in data.bytes() {
+      hash = hash.wrapping_mul(31).wrapping_add(byte as u64);
+    }
+    Some(format!("{:016x}", hash))
+  }
+
+  fn apply_persistence(&mut self, persistence: &SimPersistence) -> Result<usize, String> {
+    let mut restored = 0usize;
+    for set_state in &persistence.sets {
+      let Some(idx) = self.set_index.get(&set_state.set_id).copied() else {
+        continue;
+      };
+      let set = &mut self.sets[idx];
+
+      // Apply state
+      set.state = match set_state.state.as_str() {
+        "pending" => SimSetState::Pending,
+        "inProgress" => SimSetState::InProgress,
+        "completed" => SimSetState::Completed,
+        "skipped" => SimSetState::Skipped,
+        _ => SimSetState::Pending,
+      };
+
+      // Apply entrant IDs
+      set.slots[0].entrant_id = set_state.entrant_ids[0];
+      set.slots[1].entrant_id = set_state.entrant_ids[1];
+
+      // Apply scores
+      set.slots[0].score = Some(set_state.scores[0]);
+      set.slots[1].score = Some(set_state.scores[1]);
+
+      // Apply results
+      set.slots[0].result = set_state.results[0].as_ref().map(|r| match r.as_str() {
+        "win" => SlotResult::Win,
+        "loss" => SlotResult::Loss,
+        "dq" => SlotResult::Dq,
+        _ => SlotResult::Loss,
+      });
+      set.slots[1].result = set_state.results[1].as_ref().map(|r| match r.as_str() {
+        "win" => SlotResult::Win,
+        "loss" => SlotResult::Loss,
+        "dq" => SlotResult::Dq,
+        _ => SlotResult::Loss,
+      });
+
+      // Apply timestamps
+      set.started_at_ms = set_state.started_at_ms;
+      set.completed_at_ms = set_state.completed_at_ms;
+
+      // Determine winner/loser slots from results
+      if set.state == SimSetState::Completed {
+        if set.slots[0].result == Some(SlotResult::Win) {
+          set.winner_slot = Some(0);
+          set.loser_slot = Some(1);
+        } else if set.slots[1].result == Some(SlotResult::Win) {
+          set.winner_slot = Some(1);
+          set.loser_slot = Some(0);
+        }
+      }
+
+      restored += 1;
+    }
+    Ok(restored)
+  }
 }
 
 fn startgg_state_to_raw(state: &StartggSimState, now_ms: u64) -> Value {
@@ -1431,13 +1635,11 @@ fn startgg_state_to_raw(state: &StartggSimState, now_ms: u64) -> Value {
         "id": entrant.id,
         "name": entrant.name,
         "seeds": [{ "seedNum": entrant.seed }],
-        "customFields": [
-          { "id": "slippi-code", "name": "Slippi Code", "value": entrant.slippi_code }
-        ],
+        "initialSeedNum": entrant.seed,
         "participants": [{
           "id": participant_id,
           "gamerTag": entrant.name,
-          "prefix": null,
+          "connectedAccounts": { "slippi": { "value": entrant.slippi_code } },
           "user": {
             "id": user_id,
             "slug": slugify(&entrant.name),
@@ -2411,5 +2613,120 @@ mod tests {
     let raw = sim.raw_response(1000, None);
     // Should have event and sets data
     assert!(raw.get("data").is_some(), "raw response should have data key");
+  }
+
+  // ── persistence ──────────────────────────────────────────────────────
+
+  #[test]
+  fn persistence_path_appends_state_json() {
+    let config_path = Path::new("/test/brackets/test_bracket.json");
+    let state_path = StartggSim::persistence_path(config_path);
+    assert_eq!(state_path, PathBuf::from("/test/brackets/test_bracket.json.state.json"));
+  }
+
+  #[test]
+  fn persistence_round_trip() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    let ready_set = state.sets.iter().find(|s| {
+      s.state == "pending"
+        && s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    let Some(set) = ready_set else {
+      panic!("No ready set found");
+    };
+    let set_id = set.id;
+
+    // Complete a set
+    sim.force_winner(set_id, 0, 2000).unwrap();
+    let after = sim.state(2000);
+    let completed_set = after.sets.iter().find(|s| s.id == set_id).unwrap();
+    assert_eq!(completed_set.state, "completed");
+    let winner_id = completed_set.winner_id;
+    let scores = [
+      completed_set.slots[0].score.unwrap_or(0),
+      completed_set.slots[1].score.unwrap_or(0),
+    ];
+
+    // Use a temp file for persistence
+    let temp_dir = std::env::temp_dir();
+    let config_path = temp_dir.join("test_persistence.json");
+    let state_path = StartggSim::persistence_path(&config_path);
+
+    // Save state
+    sim.save_state(&config_path).expect("save_state should succeed");
+    assert!(state_path.exists(), "State file should exist after save");
+
+    // Create a new sim and load state
+    let mut sim2 = make_sim(4);
+    let result = sim2.load_state(&config_path).expect("load_state should succeed");
+    assert!(result.loaded, "load_state should return loaded=true when file exists");
+    assert!(result.sets_restored > 0, "Should have restored at least one set");
+
+    // Advance to propagate the loaded state
+    sim2.state(2000);
+
+    // Verify the set is restored
+    let restored_state = sim2.state(2000);
+    let restored_set = restored_state.sets.iter().find(|s| s.id == set_id).unwrap();
+    assert_eq!(restored_set.state, "completed", "Set state should be restored");
+    assert_eq!(restored_set.winner_id, winner_id, "Winner ID should be restored");
+    assert_eq!(
+      restored_set.slots[0].score.unwrap_or(0),
+      scores[0],
+      "Slot 0 score should be restored"
+    );
+    assert_eq!(
+      restored_set.slots[1].score.unwrap_or(0),
+      scores[1],
+      "Slot 1 score should be restored"
+    );
+
+    // Clean up
+    StartggSim::delete_state_file(&config_path).expect("delete_state_file should succeed");
+    assert!(!state_path.exists(), "State file should be deleted");
+  }
+
+  #[test]
+  fn persistence_detects_config_change() {
+    let mut sim = make_sim(4);
+    let state = sim.state(1000);
+    let ready_set = state.sets.iter().find(|s| {
+      s.state == "pending"
+        && s.slots.len() == 2
+        && s.slots[0].entrant_id.is_some()
+        && s.slots[1].entrant_id.is_some()
+    });
+    let Some(set) = ready_set else {
+      panic!("No ready set found");
+    };
+    let set_id = set.id;
+
+    // Complete a set
+    sim.force_winner(set_id, 0, 2000).unwrap();
+
+    // Use temp files
+    let temp_dir = std::env::temp_dir();
+    let config_path = temp_dir.join("test_hash_check.json");
+    let state_path = StartggSim::persistence_path(&config_path);
+
+    // Write a config file and save state
+    fs::write(&config_path, r#"{"test": "original"}"#).expect("write config");
+    sim.save_state(&config_path).expect("save_state should succeed");
+
+    // Modify the config file
+    fs::write(&config_path, r#"{"test": "modified"}"#).expect("write modified config");
+
+    // Create a new sim and load state - should detect mismatch
+    let mut sim2 = make_sim(4);
+    let result = sim2.load_state(&config_path).expect("load_state should succeed");
+    assert!(result.loaded, "State should still load");
+    assert!(!result.config_matched, "Config should be detected as changed");
+
+    // Clean up
+    fs::remove_file(&config_path).ok();
+    fs::remove_file(&state_path).ok();
   }
 }

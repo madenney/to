@@ -17,8 +17,8 @@ pub const MAX_SETUP_COUNT: usize = 16;
 pub const STARTGG_API_URL: &str = "https://api.start.gg/gql/alpha";
 pub const STARTGG_ENTRANTS_PER_PAGE: i32 = 200;
 pub const STARTGG_SETS_PER_PAGE: i32 = 200;
-pub const STARTGG_POLL_INTERVAL_MS: u64 = 1000;
-pub const STARTGG_IDLE_REFRESH_MS: u64 = 10_000;
+pub const STARTGG_POLL_INTERVAL_MS: u64 = 15_000;
+pub const STARTGG_IDLE_REFRESH_MS: u64 = 60_000;
 
 // ── Shared state type aliases ──────────────────────────────────────────
 
@@ -89,6 +89,8 @@ pub struct TestModeState {
     pub spoof_replays: HashMap<String, PathBuf>,
     pub startgg_sim: Option<StartggSim>,
     pub startgg_config_path: Option<PathBuf>,
+    pub state_restored_from_persistence: bool,
+    pub state_config_matched: bool,
     pub broadcast_filter_enabled: bool,
     pub broadcast_codes: HashSet<String>,
     pub broadcast_tags: HashSet<String>,
@@ -106,6 +108,8 @@ impl Default for TestModeState {
             spoof_replays: HashMap::new(),
             startgg_sim: None,
             startgg_config_path: None,
+            state_restored_from_persistence: false,
+            state_config_matched: true,
             broadcast_filter_enabled: true,
             broadcast_codes: HashSet::new(),
             broadcast_tags: HashSet::new(),
@@ -189,6 +193,15 @@ pub struct BracketConfigInfo {
 pub struct SpoofReplayResult {
     pub started: usize,
     pub missing: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BracketPersistenceStatus {
+    pub state_restored: bool,
+    pub config_matched: bool,
+    pub state_file_path: Option<String>,
+    pub state_file_exists: bool,
 }
 
 // ── Overlay types ──────────────────────────────────────────────────────
@@ -500,9 +513,7 @@ pub struct StartggEntrantNode {
     pub id: Option<Value>,
     pub name: Option<String>,
     pub seeds: Option<Vec<StartggSeedNode>>,
-    pub seed: Option<i32>,
-    pub slippi_code: Option<String>,
-    pub custom_fields: Option<Vec<StartggCustomField>>,
+    pub initial_seed_num: Option<i32>,
     pub participants: Option<Vec<StartggParticipantNode>>,
 }
 
@@ -514,15 +525,9 @@ pub struct StartggSeedNode {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartggCustomField {
-    pub name: Option<String>,
-    pub value: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StartggParticipantNode {
     pub gamer_tag: Option<String>,
+    pub connected_accounts: Option<Value>,
     pub player: Option<StartggPlayerNode>,
     pub user: Option<StartggUserNode>,
 }
@@ -531,7 +536,6 @@ pub struct StartggParticipantNode {
 #[serde(rename_all = "camelCase")]
 pub struct StartggPlayerNode {
     pub gamer_tag: Option<String>,
-    pub slippi_code: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -600,4 +604,87 @@ pub struct StartggStatsNode {
 pub struct StartggScoreNode {
     pub value: Option<f64>,
     pub label: Option<String>,
+}
+
+// ── Unified Entrant types ───────────────────────────────────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EntrantBracketState {
+    Active,
+    Eliminated,
+    Winner,
+}
+
+impl Default for EntrantBracketState {
+    fn default() -> Self {
+        EntrantBracketState::Active
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveGameInfo {
+    pub stage: Option<String>,
+    pub character: String,
+    pub opponent_code: Option<String>,
+    pub opponent_name: Option<String>,
+    pub round_label: Option<String>,
+    pub best_of: Option<u8>,
+    pub game_number: Option<u32>,
+    pub scores: Option<[u8; 2]>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnifiedEntrant {
+    // Start.gg data (primary source)
+    pub id: u32,
+    pub name: String,
+    pub seed: u32,
+    pub slippi_code: Option<String>,
+    pub team: Option<String>,
+    pub current_set_id: Option<u64>,
+    pub bracket_state: EntrantBracketState,
+
+    // Slippi App data (streaming status)
+    pub is_streaming: bool,
+
+    // Spectate folder data (playing status)
+    pub is_playing: bool,
+    pub current_game: Option<LiveGameInfo>,
+
+    // Assignment
+    pub assigned_setup_id: Option<u32>,
+    pub auto_assigned: bool,
+}
+
+impl UnifiedEntrant {
+    pub fn new(id: u32, name: String, seed: u32, slippi_code: Option<String>) -> Self {
+        UnifiedEntrant {
+            id,
+            name,
+            seed,
+            slippi_code,
+            team: None,
+            current_set_id: None,
+            bracket_state: EntrantBracketState::Active,
+            is_streaming: false,
+            is_playing: false,
+            current_game: None,
+            assigned_setup_id: None,
+            auto_assigned: false,
+        }
+    }
+}
+
+pub type SharedEntrantManager = Arc<Mutex<crate::entrants::EntrantManager>>;
+
+// ── Active game from spectate folder ────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct ActiveGame {
+    pub slippi_codes: Vec<String>,
+    pub stage: Option<String>,
+    pub characters: Vec<String>,
 }

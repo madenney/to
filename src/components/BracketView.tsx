@@ -34,10 +34,7 @@ type BracketViewProps = {
   broadcastEntrants: StartggSimEntrant[];
   broadcastSelections: Record<number, boolean>;
   broadcastActiveCount: number;
-  attendeeList: StartggSimEntrant[];
-  attendeeStatusMap: Map<number, { state: string; label: string }>;
-  attendeePlayingMap: Map<number, boolean>;
-  attendeeBroadcastMap: Map<number, boolean>;
+  isRefreshing: boolean;
   bracketScrollRef: React.RefObject<HTMLDivElement | null>;
   resolveSlotLabel: (slot: StartggSimSlot) => string;
   openBracketSettings: () => void;
@@ -47,6 +44,7 @@ type BracketViewProps = {
   cancelReplayStream: () => Promise<void>;
   streamBracketReplay: (setId: number) => Promise<void>;
   toggleBroadcast: (entrantId: number) => void;
+  refreshBracketState: () => Promise<void>;
   handleBracketDragEnter: (event: DragEvent<HTMLDivElement>) => void;
   handleBracketDragLeave: (event: DragEvent<HTMLDivElement>) => void;
   handleSetDragOver: (event: DragEvent<HTMLDivElement>, setId: number) => void;
@@ -80,10 +78,7 @@ export default function BracketView({
   broadcastEntrants,
   broadcastSelections,
   broadcastActiveCount,
-  attendeeList,
-  attendeeStatusMap,
-  attendeePlayingMap,
-  attendeeBroadcastMap,
+  isRefreshing,
   bracketScrollRef,
   resolveSlotLabel,
   openBracketSettings,
@@ -93,6 +88,7 @@ export default function BracketView({
   cancelReplayStream,
   streamBracketReplay,
   toggleBroadcast,
+  refreshBracketState,
   handleBracketDragEnter,
   handleBracketDragLeave,
   handleSetDragOver,
@@ -364,83 +360,46 @@ export default function BracketView({
               event.preventDefault();
             }}
           >
-            <aside className="broadcast-panel">
+            <aside className="broadcast-panel attendee-panel">
               <div className="broadcast-header">
-                <p className="eyebrow">Broadcast</p>
-                <div className="muted tiny">
-                  {broadcastActiveCount} of {broadcastEntrants.length} on
+                <div>
+                  <p className="eyebrow">Attendees</p>
+                  <div className="muted tiny">
+                    {broadcastActiveCount} broadcasting · {broadcastEntrants.length} total
+                  </div>
                 </div>
+                <button
+                  className="ghost-btn tiny"
+                  onClick={refreshBracketState}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? <span className="btn-spinner" /> : "Refresh"}
+                </button>
               </div>
               <div className="broadcast-list">
                 {broadcastEntrants.length === 0 ? (
-                  <div className="muted tiny">No entrants loaded.</div>
+                  <div className="muted tiny">No attendees loaded.</div>
                 ) : (
                   broadcastEntrants.map((entrant) => {
-                    const isOn = Boolean(broadcastSelections[entrant.id]);
-                    const code = entrant.slippiCode?.trim();
+                    const isBroadcasting = Boolean(broadcastSelections[entrant.id]);
                     return (
                       <label
                         key={entrant.id}
-                        className={`broadcast-item ${isOn ? "on" : "off"}`}
+                        className={`broadcast-item attendee-item ${isBroadcasting ? "on" : ""}`}
                       >
                         <input
                           type="checkbox"
                           className="broadcast-switch"
-                          checked={isOn}
+                          checked={isBroadcasting}
                           onChange={() => toggleBroadcast(entrant.id)}
                         />
                         <span className="broadcast-info">
                           <span className="broadcast-name">
-                            {stripSponsorTag(entrant.name) || "Unknown"}
-                          </span>
-                          <span className="muted tiny code">{code || "No code"}</span>
-                        </span>
-                      </label>
-                    );
-                  })
-                )}
-              </div>
-            </aside>
-            <aside className="broadcast-panel attendee-panel">
-              <div className="broadcast-header">
-                <p className="eyebrow">Attendees</p>
-                <div className="muted tiny">{attendeeList.length}</div>
-              </div>
-              <div className="broadcast-list">
-                {attendeeList.length === 0 ? (
-                  <div className="muted tiny">No attendees loaded.</div>
-                ) : (
-                  attendeeList.map((entrant) => {
-                    const status = attendeeStatusMap.get(entrant.id) ?? {
-                      state: "waiting",
-                      label: "Waiting",
-                    };
-                    const isPlaying = attendeePlayingMap.get(entrant.id) === true;
-                    const isBroadcasting = attendeeBroadcastMap.get(entrant.id) === true;
-                    return (
-                      <div key={entrant.id} className="broadcast-item attendee-item">
-                        <span className="broadcast-info">
-                          <span className="broadcast-name">
-                            {stripSponsorTag(entrant.name) || "Unknown"}
+                            #{entrant.seed} {stripSponsorTag(entrant.name) || "Unknown"}
                           </span>
                           <span className="muted tiny code">{entrant.slippiCode || "No code"}</span>
                         </span>
-                        <div className="attendee-badges">
-                          <span className="attendee-status" data-state={status.state}>
-                            {status.label}
-                          </span>
-                          {isBroadcasting && (
-                            <span className="attendee-status" data-state="broadcasting">
-                              Broadcasting
-                            </span>
-                          )}
-                          {isPlaying && (
-                            <span className="attendee-status" data-state="playing">
-                              Playing
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                      </label>
                     );
                   })
                 )}

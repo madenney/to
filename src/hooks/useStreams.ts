@@ -550,8 +550,8 @@ export function useStreams(deps: {
       const webview = new WebviewWindow("spoof-bracket", {
         url: "/?view=bracket",
         title: "Test Bracket Controller",
-        width: 1100,
-        height: 760,
+        width: 1200,
+        height: 800,
         resizable: true,
       });
       webview.once("tauri://error", (event) => {

@@ -22,8 +22,38 @@ export default function SetupDetailsModal({
   copyOverlayUrl,
   closeSetupDetails,
 }: SetupDetailsModalProps) {
-  const setupDetailsStream = setupDetails.assignedStream ?? null;
-  const setupDetailsStartggSet: StartggSimSet | null = setupDetailsStream?.startggSet ?? null;
+  const stream = setupDetails.assignedStream ?? null;
+  const startggSet: StartggSimSet | null = stream?.startggSet ?? null;
+
+  // Determine status
+  const status = stream
+    ? stream.isPlaying
+      ? "Playing"
+      : "Idle"
+    : "Unassigned";
+
+  const statusClass = stream
+    ? stream.isPlaying
+      ? "playing"
+      : "idle"
+    : "unassigned";
+
+  // Player names
+  const p1Name = stripSponsorTag(stream?.p1Tag) || stream?.p1Code || "—";
+  const p1Code = stream?.p1Code ?? null;
+  const p2Name =
+    stripSponsorTag(stream?.p2Tag) ||
+    stream?.p2Code ||
+    stripSponsorTag(setupDetailsExpectedOpponent?.tag) ||
+    setupDetailsExpectedOpponent?.code ||
+    "—";
+  const p2Code = stream?.p2Code ?? setupDetailsExpectedOpponent?.code ?? null;
+  const p2IsExpected = !stream?.p2Tag && !stream?.p2Code && setupDetailsExpectedOpponent;
+
+  // Scores
+  const p1Score = startggSet?.slots[0]?.score ?? null;
+  const p2Score = startggSet?.slots[1]?.score ?? null;
+  const hasScores = p1Score !== null || p2Score !== null;
 
   return (
     <div className="modal-backdrop" onClick={closeSetupDetails}>
@@ -34,180 +64,133 @@ export default function SetupDetailsModal({
         aria-modal="true"
         aria-label={`Setup ${setupDetails.id} details`}
       >
+        {/* Header */}
         <div className="modal-header">
-          <div>
-            <p className="eyebrow">Setup {setupDetails.id}</p>
-            <div className="setup-detail-title">{setupDetails.name}</div>
+          <div className="setup-modal-title">
+            <h2>{setupDetails.name}</h2>
+            <span className={`setup-status-pill ${statusClass}`}>{status}</span>
           </div>
-          <button className="icon-button" onClick={closeSetupDetails} aria-label="Close setup details">
-            x
+          <button className="icon-button" onClick={closeSetupDetails} aria-label="Close">
+            ×
           </button>
         </div>
-        <div className="setup-detail-grid">
-          <div className="setup-detail-card">
-            <div className="label">Setup</div>
-            <div className="setup-detail-row">
-              <span className="setup-detail-key">ID</span>
-              <span className="setup-detail-value">#{setupDetails.id}</span>
-            </div>
-            <div className="setup-detail-row">
-              <span className="setup-detail-key">Name</span>
-              <span className="setup-detail-value">{setupDetails.name}</span>
-            </div>
-            <div className="setup-detail-row">
-              <span className="setup-detail-key">Assigned</span>
-              <span className="setup-detail-value">
-                {setupDetailsStream ? "Yes" : "No"}
-              </span>
-            </div>
-          </div>
-          <div className="setup-detail-card">
-            <div className="label">Stream</div>
-            <div className="setup-detail-row">
-              <span className="setup-detail-key">ID</span>
-              <span className="setup-detail-value">
-                {setupDetailsStream?.id ?? "None"}
-              </span>
-            </div>
-            <div className="setup-detail-row">
-              <span className="setup-detail-key">Source</span>
-              <span className="setup-detail-value">
-                {setupDetailsStream?.source ?? "Unknown"}
-              </span>
-            </div>
-            <div className="setup-detail-row">
-              <span className="setup-detail-key">Status</span>
-              <span className="setup-detail-value">
-                {setupDetailsStream
-                  ? setupDetailsStream.isPlaying
-                    ? "Playing"
-                    : "Idle"
-                  : "N/A"}
-              </span>
-            </div>
-            {setupDetailsStream?.windowTitle && (
-              <div className="setup-detail-row">
-                <span className="setup-detail-key">Window</span>
-                <span className="setup-detail-value">
-                  {setupDetailsStream.windowTitle}
-                </span>
-              </div>
+
+        {/* Match Display */}
+        <div className="setup-match-display">
+          <div className="setup-match-player left">
+            <div className="setup-match-name">{p1Name}</div>
+            {p1Code && <div className="setup-match-code">{p1Code}</div>}
+            {hasScores && (
+              <div className="setup-match-score">{p1Score ?? 0}</div>
             )}
           </div>
-          <div className="setup-detail-card full">
-            <div className="label">Overlay</div>
-            <div className="setup-overlay-row">
-              <input
-                className="setup-overlay-input"
-                value={setupOverlayUrl}
-                readOnly
-                onFocus={(event) => event.currentTarget.select()}
-                aria-label={`Setup ${setupDetails.id} overlay URL`}
-              />
-              <button
-                className="ghost-btn small"
-                onClick={() => copyOverlayUrl(setupOverlayUrl)}
-                disabled={!setupOverlayUrl}
-              >
-                Copy
-              </button>
+          <div className="setup-match-vs">vs</div>
+          <div className="setup-match-player right">
+            <div className="setup-match-name">
+              {p2Name}
+              {p2IsExpected && <span className="expected-badge">expected</span>}
             </div>
-            {overlayCopyStatus && <div className="muted tiny">{overlayCopyStatus}</div>}
-          </div>
-          <div className="setup-detail-card full">
-            <div className="label">Players</div>
-            <div className="setup-player-grid">
-              <div className="setup-player-card">
-                <div className="setup-player-label">P1 (Broadcast)</div>
-                <div className="setup-player-name">
-                  {stripSponsorTag(setupDetailsStream?.p1Tag) ||
-                    setupDetailsStream?.p1Code ||
-                    "Waiting"}
-                </div>
-                <div className="muted tiny code">
-                  {setupDetailsStream?.p1Code ?? "N/A"}
-                </div>
-              </div>
-              <div className="setup-player-card right">
-                <div className="setup-player-label">P2</div>
-                <div className="setup-player-name">
-                  {stripSponsorTag(setupDetailsStream?.p2Tag) ||
-                    setupDetailsStream?.p2Code ||
-                    stripSponsorTag(setupDetailsExpectedOpponent?.tag) ||
-                    setupDetailsExpectedOpponent?.code ||
-                    "Waiting"}
-                </div>
-                <div className="muted tiny code">
-                  {setupDetailsStream?.p2Code ??
-                    setupDetailsExpectedOpponent?.code ??
-                    "N/A"}
-                </div>
-              </div>
-            </div>
-            {setupDetailsExpectedOpponent && (
-              <div className="setup-detail-row">
-                <span className="setup-detail-key">Expected</span>
-                <span className="setup-detail-value">
-                  {stripSponsorTag(setupDetailsExpectedOpponent.tag) ||
-                    setupDetailsExpectedOpponent.code ||
-                    "Unknown"}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="setup-detail-card full">
-            <div className="label">Start.gg Set</div>
-            {setupDetailsStartggSet ? (
-              <>
-                <div className="setup-detail-row">
-                  <span className="setup-detail-key">Round</span>
-                  <span className="setup-detail-value">
-                    {setupDetailsStartggSet.roundLabel}
-                  </span>
-                </div>
-                <div className="setup-detail-row">
-                  <span className="setup-detail-key">Phase</span>
-                  <span className="setup-detail-value">
-                    {setupDetailsStartggSet.phaseName}
-                  </span>
-                </div>
-                <div className="setup-detail-row">
-                  <span className="setup-detail-key">State</span>
-                  <span className="setup-detail-value">
-                    {setupDetailsStartggSet.state}
-                  </span>
-                </div>
-                <div className="setup-detail-row">
-                  <span className="setup-detail-key">Best of</span>
-                  <span className="setup-detail-value">
-                    {setupDetailsStartggSet.bestOf}
-                  </span>
-                </div>
-                <div className="setup-set-slots">
-                  {setupDetailsStartggSet.slots.map((slot, idx) => (
-                    <div key={`${setupDetails.id}-slot-${idx}`} className="setup-set-slot">
-                      <div className="setup-set-slot-name">{resolveSlotLabel(slot)}</div>
-                      <div className="muted tiny code">{slot.slippiCode ?? "No code"}</div>
-                      <div className="setup-set-slot-meta">
-                        {slot.score !== null && slot.score !== undefined && (
-                          <span className="setup-slot-pill">Score {slot.score}</span>
-                        )}
-                        {slot.result && (
-                          <span className="setup-slot-pill">{slot.result}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="muted tiny">No Start.gg set attached yet.</div>
+            {p2Code && <div className="setup-match-code">{p2Code}</div>}
+            {hasScores && (
+              <div className="setup-match-score">{p2Score ?? 0}</div>
             )}
           </div>
         </div>
-        <details className="setup-raw">
-          <summary>Raw JSON</summary>
-          <pre>{setupDetailsJson}</pre>
+
+        {/* Match Info */}
+        {startggSet && (
+          <div className="setup-match-info">
+            <div className="setup-info-item">
+              <span className="setup-info-label">Round</span>
+              <span className="setup-info-value">{startggSet.roundLabel}</span>
+            </div>
+            <div className="setup-info-item">
+              <span className="setup-info-label">Phase</span>
+              <span className="setup-info-value">{startggSet.phaseName}</span>
+            </div>
+            <div className="setup-info-item">
+              <span className="setup-info-label">Format</span>
+              <span className="setup-info-value">Bo{startggSet.bestOf}</span>
+            </div>
+            <div className="setup-info-item">
+              <span className="setup-info-label">State</span>
+              <span className={`setup-info-value state-${startggSet.state}`}>
+                {startggSet.state}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {!startggSet && stream && (
+          <div className="setup-no-set">
+            No Start.gg set linked yet
+          </div>
+        )}
+
+        {!stream && (
+          <div className="setup-no-set">
+            No stream assigned to this setup
+          </div>
+        )}
+
+        {/* Overlay URL */}
+        <div className="setup-overlay-section">
+          <div className="setup-info-label">Overlay URL</div>
+          <div className="setup-overlay-row">
+            <input
+              className="setup-overlay-input"
+              value={setupOverlayUrl}
+              readOnly
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <button
+              className="ghost-btn small"
+              onClick={() => copyOverlayUrl(setupOverlayUrl)}
+              disabled={!setupOverlayUrl}
+            >
+              Copy
+            </button>
+          </div>
+          {overlayCopyStatus && <div className="muted tiny">{overlayCopyStatus}</div>}
+        </div>
+
+        {/* Debug Info (collapsible) */}
+        <details className="setup-debug">
+          <summary>Debug Info</summary>
+          <div className="setup-debug-grid">
+            <div className="setup-debug-item">
+              <span className="setup-debug-label">Setup ID</span>
+              <span className="setup-debug-value">{setupDetails.id}</span>
+            </div>
+            <div className="setup-debug-item">
+              <span className="setup-debug-label">Stream ID</span>
+              <span className="setup-debug-value">{stream?.id ?? "—"}</span>
+            </div>
+            <div className="setup-debug-item">
+              <span className="setup-debug-label">Source</span>
+              <span className="setup-debug-value">{stream?.source ?? "—"}</span>
+            </div>
+            <div className="setup-debug-item">
+              <span className="setup-debug-label">Window</span>
+              <span className="setup-debug-value">{stream?.windowTitle ?? "—"}</span>
+            </div>
+            {startggSet && (
+              <>
+                <div className="setup-debug-item">
+                  <span className="setup-debug-label">Set ID</span>
+                  <span className="setup-debug-value">{startggSet.id}</span>
+                </div>
+                <div className="setup-debug-item">
+                  <span className="setup-debug-label">Round #</span>
+                  <span className="setup-debug-value">{startggSet.round}</span>
+                </div>
+              </>
+            )}
+          </div>
+          <details className="setup-raw">
+            <summary>Raw JSON</summary>
+            <pre>{setupDetailsJson}</pre>
+          </details>
         </details>
       </div>
     </div>

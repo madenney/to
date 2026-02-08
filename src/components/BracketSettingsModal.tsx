@@ -7,6 +7,7 @@ const BRACKET_ZOOM_STEP = 0.05;
 type BracketSettingsModalProps = {
   config: AppConfig;
   bracketZoom: number;
+  isRefreshing: boolean;
   setBracketZoom: (zoom: number) => void;
   setAutoCompleteBracket: (enabled: boolean) => void;
   resetBracketState: () => Promise<void>;
@@ -17,6 +18,7 @@ type BracketSettingsModalProps = {
 export default function BracketSettingsModal({
   config,
   bracketZoom,
+  isRefreshing,
   setBracketZoom,
   setAutoCompleteBracket,
   resetBracketState,
@@ -41,8 +43,8 @@ export default function BracketSettingsModal({
               <button className="ghost-btn small" onClick={resetBracketState}>
                 Reset bracket
               </button>
-              <button className="ghost-btn small" onClick={() => refreshBracketState()}>
-                Refresh
+              <button className="ghost-btn small" onClick={() => refreshBracketState()} disabled={isRefreshing}>
+                {isRefreshing ? <><span className="btn-spinner" /> Refreshing…</> : "Refresh"}
               </button>
             </div>
           </div>

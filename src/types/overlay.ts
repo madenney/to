@@ -137,3 +137,48 @@ export type ReplayStreamUpdate = {
   fps?: number | null;
   message?: string | null;
 };
+
+// Unified Entrant types for entrant-centric architecture
+
+export type EntrantBracketState = "active" | "eliminated" | "winner";
+
+export type LiveGameInfo = {
+  stage?: string | null;
+  character: string;
+  opponentCode?: string | null;
+  opponentName?: string | null;
+  roundLabel?: string | null;
+  bestOf?: number | null;
+  gameNumber?: number | null;
+  scores?: [number, number] | null;
+};
+
+export type UnifiedEntrant = {
+  // Start.gg data (primary source)
+  id: number;
+  name: string;
+  seed: number;
+  slippiCode?: string | null;
+  team?: string | null;
+  currentSetId?: number | null;
+  bracketState: EntrantBracketState;
+
+  // Slippi App data (streaming status)
+  isStreaming: boolean;
+
+  // Spectate folder data (playing status)
+  isPlaying: boolean;
+  currentGame?: LiveGameInfo | null;
+
+  // Assignment
+  assignedSetupId?: number | null;
+  autoAssigned: boolean;
+};
+
+export type SetupWithSeed = {
+  id: number;
+  name: string;
+  assignedEntrantIds: number[];
+  highestSeed?: number | null;
+  isAvailable: boolean;
+};

@@ -71,12 +71,11 @@ query EventEntrants($slug: String!, $page: Int!, $perPage: Int!) {
         id
         name
         seeds { seedNum }
-        seed
-        slippiCode
-        customFields { name value }
+        initialSeedNum
         participants {
           gamerTag
-          player { gamerTag slippiCode }
+          connectedAccounts
+          player { gamerTag }
           user { authorizations { type externalUsername } }
         }
       }
@@ -96,6 +95,7 @@ query EventEntrants($slug: String!, $page: Int!, $perPage: Int!) {
         id
         name
         seeds { seedNum }
+        initialSeedNum
         participants {
           gamerTag
           player { gamerTag }
@@ -565,24 +565,20 @@ pub fn resolve_live_round_label(full_round_text: Option<&String>, round: i32) ->
   "Grand Finals".to_string()
 }
 
+/// Try to extract a Slippi connect code from an entrant via multiple sources:
+/// 1. participant.connectedAccounts JSON (custom registration fields)
+/// 2. user.authorizations (linked accounts on start.gg profile)
+/// 3. gamerTag containing a '#' (some players set their tag as their code)
 pub fn extract_slippi_code(entrant: &StartggEntrantNode) -> Option<String> {
-  if let Some(code) = entrant.slippi_code.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
-    return Some(code.to_string());
-  }
-  for field in entrant.custom_fields.as_ref().into_iter().flatten() {
-    let name = field.name.as_deref().unwrap_or("").to_lowercase();
-    if name.contains("slippi") || name.contains("connect") {
-      if let Some(value) = field.value.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
-        return Some(value.to_string());
-      }
-    }
-  }
   for participant in entrant.participants.as_ref().into_iter().flatten() {
-    if let Some(player) = &participant.player {
-      if let Some(code) = player.slippi_code.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
-        return Some(code.to_string());
+    // Check connectedAccounts JSON for Slippi connect codes.
+    // This is where custom registration field answers end up.
+    if let Some(accounts) = &participant.connected_accounts {
+      if let Some(code) = extract_slippi_from_connected_accounts(accounts) {
+        return Some(code);
       }
     }
+    // Check user authorizations (linked accounts on their start.gg profile)
     if let Some(user) = &participant.user {
       for auth in user.authorizations.as_ref().into_iter().flatten() {
         let auth_type = auth.kind.as_deref().unwrap_or("").to_lowercase();
@@ -598,6 +594,7 @@ pub fn extract_slippi_code(entrant: &StartggEntrantNode) -> Option<String> {
         }
       }
     }
+    // Fallback: check if gamerTag looks like a connect code (contains '#')
     let tags = [
       participant.gamer_tag.as_deref(),
       participant.player.as_ref().and_then(|p| p.gamer_tag.as_deref()),
@@ -609,6 +606,56 @@ pub fn extract_slippi_code(entrant: &StartggEntrantNode) -> Option<String> {
         }
       }
     }
+  }
+  None
+}
+
+/// Parse the connectedAccounts JSON for anything that looks like a Slippi code.
+/// The JSON structure varies, but we look for values matching the TAG#123 pattern
+/// or keys containing "slippi" or "connect".
+fn extract_slippi_from_connected_accounts(accounts: &Value) -> Option<String> {
+  let code_pattern = |s: &str| -> bool {
+    let s = s.trim();
+    // Slippi codes look like TAG#123
+    s.contains('#') && s.len() >= 3 && s.len() <= 10
+  };
+
+  match accounts {
+    Value::Object(map) => {
+      // Check keys/values for slippi-related entries
+      for (key, value) in map {
+        let key_lower = key.to_lowercase();
+        if key_lower.contains("slippi") || key_lower.contains("connect") {
+          if let Some(s) = value.as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            return Some(s.to_string());
+          }
+        }
+      }
+      // Also check all string values for connect code pattern
+      for value in map.values() {
+        if let Some(s) = value.as_str().map(|s| s.trim()).filter(|s| code_pattern(s)) {
+          return Some(s.to_string());
+        }
+        // Recurse into nested objects/arrays
+        if let Some(code) = extract_slippi_from_connected_accounts(value) {
+          return Some(code);
+        }
+      }
+    }
+    Value::Array(arr) => {
+      for item in arr {
+        if let Some(code) = extract_slippi_from_connected_accounts(item) {
+          return Some(code);
+        }
+      }
+    }
+    Value::String(s) => {
+      let s = s.trim();
+      if code_pattern(s) {
+        return Some(s.to_string());
+      }
+    }
+    _ => {}
   }
   None
 }
@@ -666,7 +713,7 @@ pub fn build_live_startgg_state(
       .seeds
       .as_ref()
       .and_then(|seeds| seeds.first().and_then(|seed| seed.seed_num))
-      .or(entrant.seed)
+      .or(entrant.initial_seed_num)
       .unwrap_or((idx + 1) as i32)
       .max(1) as u32;
     let slippi_code = extract_slippi_code(entrant).unwrap_or_default();
@@ -870,6 +917,16 @@ pub fn maybe_refresh_live_startgg(
     }
   }
 
+  // Rate-limit: never fetch more often than the poll interval
+  if needs_refresh {
+    if let Some(last) = last_fetch {
+      let age_ms = last.elapsed().map(|age| age.as_millis() as u64).unwrap_or(u64::MAX);
+      if age_ms < STARTGG_POLL_INTERVAL_MS && cached_state.is_some() {
+        return cached_state;
+      }
+    }
+  }
+
   if !needs_refresh || fetch_in_flight {
     return cached_state;
   }
@@ -898,7 +955,10 @@ pub fn maybe_refresh_live_startgg(
   }
 }
 
-pub fn spawn_startgg_polling(live_state: SharedLiveStartgg) {
+pub fn spawn_startgg_polling(
+  live_state: SharedLiveStartgg,
+  entrant_manager: Option<crate::types::SharedEntrantManager>,
+) {
   std::thread::spawn(move || loop {
     let config = load_config_inner().unwrap_or_else(|_| AppConfig::default());
     if config.test_mode || !config.startgg_polling {
@@ -909,7 +969,14 @@ pub fn spawn_startgg_polling(live_state: SharedLiveStartgg) {
       sleep(Duration::from_millis(STARTGG_POLL_INTERVAL_MS));
       continue;
     }
-    maybe_refresh_live_startgg(&config, &live_state, true);
+    if let Some(state) = maybe_refresh_live_startgg(&config, &live_state, true) {
+      // Update entrant manager with new Start.gg state
+      if let Some(ref manager) = entrant_manager {
+        if let Ok(mut guard) = manager.lock() {
+          guard.update_from_startgg(&state);
+        }
+      }
+    }
     sleep(Duration::from_millis(STARTGG_POLL_INTERVAL_MS));
   });
 }
@@ -994,12 +1061,41 @@ pub fn load_startgg_sim_config_from(path: &Path) -> Result<StartggSimConfig, Str
 
 pub fn init_startgg_sim(guard: &mut TestModeState, now: u64) -> Result<(), String> {
   if guard.startgg_sim.is_none() {
-    let config = if let Some(path) = guard.startgg_config_path.clone() {
-      load_startgg_sim_config_from(&path)?
+    let config_path = guard.startgg_config_path.clone();
+    let effective_path = config_path.clone().unwrap_or_else(startgg_sim_config_path);
+    let config = if let Some(ref path) = config_path {
+      load_startgg_sim_config_from(path)?
     } else {
       load_startgg_sim_config()?
     };
-    guard.startgg_sim = Some(StartggSim::new(config, now)?);
+    let mut sim = StartggSim::new(config, now)?;
+
+    // Load persisted state if available
+    match sim.load_state(&effective_path) {
+      Ok(result) if result.loaded => {
+        tracing::info!(
+          "Loaded persisted bracket state from {} ({} sets restored, config {})",
+          StartggSim::persistence_path(&effective_path).display(),
+          result.sets_restored,
+          if result.config_matched { "matched" } else { "changed" }
+        );
+        guard.state_restored_from_persistence = true;
+        guard.state_config_matched = result.config_matched;
+        // Re-advance to propagate loaded state through the bracket
+        sim.state(now);
+      }
+      Ok(_) => {
+        guard.state_restored_from_persistence = false;
+        guard.state_config_matched = true;
+      }
+      Err(e) => {
+        tracing::warn!("Failed to load persisted bracket state: {}", e);
+        guard.state_restored_from_persistence = false;
+        guard.state_config_matched = true;
+      }
+    }
+
+    guard.startgg_sim = Some(sim);
   }
   Ok(())
 }
